@@ -1,0 +1,32 @@
+@import url("https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600;700&family=Prompt:wght@300;400;500;600;700&family=IBM+Plex+Sans+Thai:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap");
+@import "tailwindcss";
+
+/* โทนตามดีไซน์ "ALS Rehab" — เว็บเวชระเบียน/นักกายภาพ (rx-*) และแอปผู้ป่วย (pt-*) */
+@theme {
+  --color-rx-bg: #F7F8FB;
+  --color-rx-ink: #16365F;
+  --color-rx-muted: #5B738B;
+  --color-rx-faint: #B3BCC8;
+  --color-rx-line: #DDE3EA;
+  --color-rx-soft: #EEF1F6;
+  --color-rx-divider: #F1F4F8;
+  --color-rx-accent: #4D53E0;
+  --color-rx-accent-ink: #3A40C9;
+  --color-rx-accent-deep: #2F33A7;
+  --color-rx-tint: #EDEEFC;
+  --color-rx-tint-2: #C9CBF6;
+  --color-pt-bg: #F7F5FB;
+  --color-pt-ink: #1F1D2B;
+  --color-pt-muted: #625E70;
+  --color-pt-line: #ECE8F3;
+  --color-pt-divider: #F1EDF6;
+  --color-pt-accent: #C4501A;
+  --color-pt-accent-ink: #A8430F;
+  --color-pt-tint: #FBE7DC;
+  --font-rx: "Poppins", "Prompt", "Noto Sans Thai", sans-serif;
+  --font-pt: "IBM Plex Sans Thai", "Noto Sans Thai", "Leelawadee UI", sans-serif;
+}
+
+body { background: var(--color-rx-bg); color: var(--color-rx-ink); font-family: var(--font-rx); }
+button { font-family: inherit; cursor: pointer; }
+input, select, textarea { font-family: inherit; }

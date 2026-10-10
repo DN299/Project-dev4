@@ -1,0 +1,1 @@
+ALTER TABLE "occupational_therapists" ALTER COLUMN "license_number" SET NOT NULL;
