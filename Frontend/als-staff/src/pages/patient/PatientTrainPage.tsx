@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import type { Device, TherapySession, PatientProgram } from "../../types";
-import { ChevronLeft } from "lucide-react";
+import { ChevronLeft, Check, AlertTriangle } from "lucide-react";
 import { api, list } from "../../lib/clinic";
 import { fmtDuration } from "./patientUtils";
 import {
@@ -15,8 +15,8 @@ import {
 interface Props {
   patientId: string;
   onBack: () => void;
-  /** เรียกเมื่อบอร์ดบันทึกเซตเสร็จ (ตอนนี้ส่ง null: หน้าจบเซตจะอ่านผลจาก skateboard_sessions เอง ในรอบถัดไป) */
-  onFinish: (session: TherapySession | null) => void;
+  /** ไม่ใช้แล้ว (จบเซตแล้วแสดงผลในหน้านี้เลย) เก็บไว้เพื่อไม่ให้ไฟล์ที่เรียกหน้านี้ error */
+  onFinish?: (session: TherapySession | null) => void;
 }
 
 /** ผลเซตที่บอร์ดบันทึก (ตาราง skateboard_sessions) */
@@ -131,11 +131,7 @@ function AngleBar({ angle, returning }: { angle: number; returning: boolean }) {
   );
 }
 
-export default function PatientTrainPage({
-  patientId,
-  onBack,
-  onFinish,
-}: Props) {
+export default function PatientTrainPage({ patientId, onBack }: Props) {
   const [program, setProgram] = useState<PatientProgram | null>(null);
   const [device, setDevice] = useState<LiveDevice | null>(null);
   const [sides, setSides] = useState<Side[]>([]);
@@ -147,17 +143,38 @@ export default function PatientTrainPage({
     "claim" | "start" | "stop" | null
   >(null);
   const [error, setError] = useState<string | null>(null);
+  const [lastSet, setLastSet] = useState<SkateSession | null>(null); // เซตที่เพิ่งจบ → แสดงหน้าผล
+  const [confirmEnd, setConfirmEnd] = useState(false); // ถามยืนยันเมื่อจบก่อนครบเวลา
 
   const baseline = useRef<Set<number> | null>(null);
   const runStartedAt = useRef<number | null>(null);
-  const finished = useRef(false);
-  const onFinishRef = useRef(onFinish);
-  onFinishRef.current = onFinish;
+  const stopTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const timeUpCued = useRef(false);
+  const sidesRef = useRef<Side[]>([]);
+  sidesRef.current = sides;
 
-  const finish = () => {
-    if (finished.current) return;
-    finished.current = true;
-    onFinishRef.current(null);
+  /** บอร์ดบันทึกเซตใหม่แล้ว → แสดงผลในหน้านี้ แล้วเตรียมเซตถัดไป */
+  const onNewSet = (fresh: SkateSession[]) => {
+    fresh.forEach((x) => baseline.current?.add(x.id));
+    const newest = fresh.reduce((a, b) =>
+      a.created_at > b.created_at ? a : b,
+    );
+    if (stopTimer.current) clearTimeout(stopTimer.current);
+    runStartedAt.current = null;
+    timeUpCued.current = false;
+    setElapsed(0);
+    setBusyAction(null);
+    setConfirmEnd(false);
+    setLastSet(newest);
+    setTodaySessions((prev) => {
+      // เซตที่ได้ 0 ครั้งไม่นับ (ตรงกับหน้าอื่น)
+      const next = [
+        ...prev,
+        ...fresh.filter((x) => isToday(x.created_at) && x.session_count > 0),
+      ];
+      setSide(suggestSide(sidesRef.current, next)); // เสนอข้างที่ยังทำน้อยกว่าสำหรับเซตถัดไป
+      return next;
+    });
   };
 
   // ---------- ออนไลน์ = last_seen_at ยังเปลี่ยนอยู่ ----------
@@ -218,7 +235,9 @@ export default function PatientTrainPage({
         setProgram(pp.find((x) => x.status === "ACTIVE") ?? null);
         setDevice(d);
         baseline.current = new Set(s.map((x) => x.id));
-        const today = s.filter((x) => isToday(x.created_at));
+        const today = s.filter(
+          (x) => isToday(x.created_at) && x.session_count > 0,
+        );
         setTodaySessions(today);
         const mySides = sidesFromAffected(
           patients.find((p) => p.patient_id === patientId)?.affected_side,
@@ -243,8 +262,9 @@ export default function PatientTrainPage({
         .catch(() => {});
       fetchSkateSessions(patientId)
         .then((s) => {
-          if (baseline.current && s.some((x) => !baseline.current!.has(x.id)))
-            finish();
+          if (!baseline.current) return;
+          const fresh = s.filter((x) => !baseline.current!.has(x.id));
+          if (fresh.length) onNewSet(fresh);
         })
         .catch(() => {});
     }, POLL_MS);
@@ -305,8 +325,16 @@ export default function PatientTrainPage({
     }
   };
 
-  const endSet = async () => {
+  // กดจบเซต: ถ้ายังไม่ครบเวลา ถามยืนยันก่อน (ไม่ล็อกปุ่ม เพราะผู้ป่วยอาจเหนื่อยหรือปวด)
+  const endSet = () => {
     if (!device || busyAction) return;
+    if (!timeUp && targetSec > 0) setConfirmEnd(true);
+    else doEndSet();
+  };
+
+  const doEndSet = async () => {
+    if (!device || busyAction) return;
+    setConfirmEnd(false);
     setError(null);
     setBusyAction("stop");
     const err = await post("/api/devices/command", {
@@ -319,16 +347,19 @@ export default function PatientTrainPage({
       setBusyAction(null);
       return;
     }
-    setTimeout(finish, STOP_WAIT_MS); // ปกติเจอผลภายใน 2–3 วิ
+    // ปกติได้ผลภายใน 2–3 วิ ถ้านานเกินให้บอกผู้ป่วย
+    stopTimer.current = setTimeout(() => {
+      setBusyAction(null);
+      setError(
+        "ยังไม่ได้รับผลจากเครื่อง ผลจะขึ้นในหน้าผลการฝึกเมื่อเครื่องส่งมา",
+      );
+    }, STOP_WAIT_MS);
   };
 
+  const backLocked = phase === "running" || busyAction === "stop";
+
   const goBack = () => {
-    if (device && phase === "running")
-      post("/api/devices/command", {
-        deviceId: device.device_id,
-        patientId,
-        command: "STOP",
-      });
+    if (backLocked) return; // กำลังฝึกอยู่ กลับไม่ได้ ต้องกดจบเซตก่อน
     onBack();
   };
 
@@ -341,11 +372,67 @@ export default function PatientTrainPage({
   const totalSets = program?.session_per_day ?? 0;
   const liveAngle = phase === "running" ? num(device?.live_angle) : null;
   const returning = device?.live_phase === "RETURN";
-  const imuError = phase === "running" && device?.imu_status === "ERROR";
+  // เซ็นเซอร์มีปัญหา (บอร์ดส่ง imu_status = ERROR) ดูเฉพาะตอนเครื่องออนไลน์ ค่าเก่าตอนออฟไลน์ไม่นับ
+  const imuError =
+    (phase === "available" || phase === "ready" || phase === "running") &&
+    device?.imu_status === "ERROR";
+  // ข้างที่ทำครบตามโปรแกรมแล้ว เลือกไม่ได้อีก
+  const sideFull = (sd: Side) =>
+    SETS_ARE_PER_SIDE &&
+    totalSets > 0 &&
+    countBySide(todaySessions)[sd] >= totalSets;
+  const otherSide: Side | null = side
+    ? side === "RIGHT"
+      ? "LEFT"
+      : "RIGHT"
+    : null;
   const canSwitchSide =
     sides.length > 1 &&
+    !!otherSide &&
+    !sideFull(otherSide) &&
     (phase === "available" || phase === "ready") &&
     !busyAction;
+
+  // ข้างที่เลือกอยู่ครบแล้ว แต่อีกข้างยังไม่ครบ → สลับไปข้างที่ยังไม่ครบให้เอง
+  useEffect(() => {
+    if (phase === "running" || !side || !otherSide) return;
+    if (sideFull(side) && sides.includes(otherSide) && !sideFull(otherSide))
+      setSide(otherSide);
+  }, [side, todaySessions, totalSets, phase]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // นับถอยหลังจากเวลาฝึกในโปรแกรม (ไม่มีเวลาในโปรแกรม = นับเวลาที่ใช้แทน)
+  const targetSec = program?.duration_sec ?? 0;
+  const started = runStartedAt.current !== null;
+  const remainingSec = Math.max(0, targetSec - elapsed);
+  const timeUp = targetSec > 0 && started && remainingSec === 0;
+
+  // เตือนด้วยเสียง/สั่น เมื่อเซ็นเซอร์เริ่มมีปัญหาระหว่างฝึก
+  const imuCued = useRef(false);
+  useEffect(() => {
+    if (imuError && phase === "running" && !imuCued.current) {
+      imuCued.current = true;
+      cue();
+      setTimeout(cue, 250);
+    }
+    if (!imuError) imuCued.current = false;
+  }, [imuError, phase]);
+
+  // ส่งเสียงครั้งเดียวเมื่อครบเวลา
+  useEffect(() => {
+    if (timeUp && !timeUpCued.current) {
+      timeUpCued.current = true;
+      cue();
+    }
+  }, [timeUp]);
+
+  // ทำครบทุกข้างตามโปรแกรมแล้วหรือยัง
+  const bySide = countBySide(todaySessions);
+  const sidesToDo: Side[] = sides.length ? sides : side ? [side] : [];
+  const allDone =
+    totalSets > 0 &&
+    (SETS_ARE_PER_SIDE && sidesToDo.length
+      ? sidesToDo.every((sd) => bySide[sd] >= totalSets)
+      : todaySessions.length >= totalSets);
 
   const status = {
     none: { text: "ไม่พบเครื่องฝึก", tone: "muted" },
@@ -367,7 +454,9 @@ export default function PatientTrainPage({
           : phase === "available"
             ? "กดเชื่อมต่อเพื่อเริ่ม"
             : phase === "ready"
-              ? "พร้อมแล้ว กดเริ่มเซต"
+              ? imuError
+                ? "รอเซ็นเซอร์กลับมาปกติ"
+                : "พร้อมแล้ว กดเริ่มเซต"
               : busyAction === "stop"
                 ? "กำลังบันทึกผล..."
                 : imuError
@@ -400,17 +489,110 @@ export default function PatientTrainPage({
               filled: false,
             };
   const primaryDisabled =
-    !!busyAction || phase === "none" || phase === "offline" || phase === "busy";
+    !!busyAction ||
+    phase === "none" ||
+    phase === "offline" ||
+    phase === "busy" ||
+    (imuError && phase === "ready"); // เซ็นเซอร์เสีย ห้ามเริ่มเซต (นับไม่ได้) แต่ยังกดจบเซตได้เสมอ
+
+  // ---------- หน้าผลหลังจบเซต ----------
+  if (lastSet) {
+    const lastSide = lastSet.side ?? null;
+    const lastNo =
+      lastSide && SETS_ARE_PER_SIDE ? bySide[lastSide] : todaySessions.length;
+    return (
+      <div className="flex min-h-full flex-col gap-4 px-5 pb-7 pt-8">
+        <div className="flex flex-col items-center gap-3 text-center">
+          <div className="flex h-[72px] w-[72px] items-center justify-center rounded-full bg-[#E4F5EC] text-[#1F9D5C]">
+            <Check size={38} strokeWidth={2.6} />
+          </div>
+          <span className="text-[22px] font-bold">
+            {lastSet.session_count === 0
+              ? "เซตนี้ยังไม่ได้นับ"
+              : allDone
+                ? "ฝึกครบแล้ววันนี้"
+                : `เซต ${lastNo} เสร็จแล้ว`}
+          </span>
+        </div>
+
+        <div className="flex flex-col items-center gap-1 rounded-[20px] bg-white px-5 py-6 shadow-[0_1px_3px_rgba(31,29,43,0.06)]">
+          <span className="text-[72px] font-bold leading-none tabular-nums">
+            {lastSet.session_count}
+          </span>
+          <span className="text-[17px] text-pt-muted">
+            {lastSet.session_count === 0 ? "ไม่นับเป็นเซต · " : ""}ครั้ง
+            {lastSide ? ` · ${SIDE_LABEL[lastSide]}` : ""}
+          </span>
+        </div>
+
+        {totalSets > 0 && (
+          <div className="flex flex-col gap-2.5 rounded-2xl bg-white px-5 py-4">
+            <span className="text-[16px] font-semibold">ความคืบหน้าวันนี้</span>
+            {(SETS_ARE_PER_SIDE && sidesToDo.length ? sidesToDo : [null]).map(
+              (sd) => {
+                const n = sd ? bySide[sd] : todaySessions.length;
+                return (
+                  <div key={sd ?? "all"} className="flex items-center gap-3">
+                    {sd && (
+                      <span className="w-[72px] shrink-0 text-[15px] text-pt-muted">
+                        {SIDE_LABEL[sd]}
+                      </span>
+                    )}
+                    <div className="flex flex-1 gap-1.5">
+                      {Array.from({ length: totalSets }, (_, i) => (
+                        <div
+                          key={i}
+                          className={`h-2.5 flex-1 rounded-full ${i < n ? "bg-pt-accent" : "bg-pt-divider"}`}
+                        />
+                      ))}
+                    </div>
+                    <span className="w-[44px] shrink-0 text-right text-[15px] font-semibold tabular-nums">
+                      {Math.min(n, totalSets)}/{totalSets}
+                    </span>
+                  </div>
+                );
+              },
+            )}
+          </div>
+        )}
+
+        <div className="flex-1" />
+
+        {!allDone && (
+          <button
+            type="button"
+            onClick={() => setLastSet(null)}
+            className="h-[60px] rounded-[16px] bg-pt-accent text-[18px] font-bold text-white active:scale-[0.98]"
+          >
+            ฝึกเซตถัดไป{side ? ` · ${SIDE_LABEL[side]}` : ""}
+          </button>
+        )}
+        <button
+          type="button"
+          onClick={onBack}
+          className={`h-[60px] rounded-[16px] text-[18px] font-bold active:scale-[0.98] ${
+            allDone
+              ? "bg-pt-accent text-white"
+              : "border-2 border-pt-accent bg-white text-pt-accent-ink"
+          }`}
+        >
+          {allDone ? "เสร็จแล้ว" : "พักก่อน"}
+        </button>
+      </div>
+    );
+  }
 
   return (
     <div className="flex min-h-full flex-col gap-4 px-5 pb-7 pt-5">
       {/* หัวหน้า */}
       <div className="flex items-center gap-3">
+        {/* ระหว่างฝึก/กำลังบันทึก ปุ่มกลับเป็นสีเทากดไม่ได้ กันเผลอกด ต้องกด "จบเซต" ก่อน */}
         <button
           type="button"
           onClick={goBack}
+          disabled={backLocked}
           aria-label="กลับ"
-          className="flex h-12 w-12 items-center justify-center rounded-xl border border-pt-line bg-white"
+          className="flex h-12 w-12 items-center justify-center rounded-xl border border-pt-line bg-white disabled:border-transparent disabled:bg-pt-divider disabled:text-[#B9B5C4]"
         >
           <ChevronLeft size={22} />
         </button>
@@ -463,6 +645,26 @@ export default function PatientTrainPage({
         )}
       </div>
 
+      {/* แจ้งเตือนเซ็นเซอร์มีปัญหา */}
+      {imuError && (
+        <div
+          role="alert"
+          className="flex items-start gap-3 rounded-2xl border-2 border-[#F4B4AE] bg-[#FDECEA] px-4 py-3.5"
+        >
+          <AlertTriangle size={24} className="mt-0.5 shrink-0 text-[#B42318]" />
+          <div className="flex flex-col">
+            <span className="text-[17px] font-bold text-[#B42318]">
+              เซ็นเซอร์มีปัญหา
+            </span>
+            <span className="text-[15px] text-[#7A271A]">
+              {phase === "running"
+                ? "เครื่องอาจนับไม่ได้ หยุดพักแล้วแจ้งนักกายภาพ"
+                : "ยังเริ่มเซตไม่ได้ แจ้งนักกายภาพให้ตรวจเครื่อง"}
+            </span>
+          </div>
+        </div>
+      )}
+
       {/* ตัวเลขหลัก */}
       <div className="flex flex-col items-center gap-5 rounded-[20px] bg-white px-5 pb-6 pt-7 shadow-[0_1px_3px_rgba(31,29,43,0.06)]">
         <span
@@ -482,12 +684,28 @@ export default function PatientTrainPage({
         )}
       </div>
 
-      {/* เวลา (แสดงเมื่อเริ่มเซตแล้ว) */}
-      {runStartedAt.current !== null && (
-        <div className="flex items-baseline justify-between rounded-2xl bg-white px-5 py-4">
-          <span className="text-[15px] text-pt-muted">เวลาที่ใช้</span>
-          <span className="text-[24px] font-bold tabular-nums">
-            {fmtDuration(elapsed)}
+      {/* เวลา: นับถอยหลังจากเวลาฝึกในโปรแกรม */}
+      {(targetSec > 0 || started) && (
+        <div
+          className={`flex items-baseline justify-between rounded-2xl px-5 py-4 ${timeUp ? "bg-[#E4F5EC]" : "bg-white"}`}
+        >
+          <span
+            className={`text-[15px] ${timeUp ? "font-semibold text-[#145C38]" : "text-pt-muted"}`}
+          >
+            {timeUp
+              ? "ครบเวลาแล้ว"
+              : targetSec > 0
+                ? started
+                  ? "เหลือเวลา"
+                  : "เวลาฝึก"
+                : "เวลาที่ใช้"}
+          </span>
+          <span
+            className={`text-[28px] font-bold tabular-nums ${timeUp ? "text-[#145C38]" : ""}`}
+          >
+            {targetSec > 0
+              ? fmtDuration(started ? remainingSec : targetSec)
+              : fmtDuration(elapsed)}
           </span>
         </div>
       )}
@@ -509,8 +727,42 @@ export default function PatientTrainPage({
       </button>
       {phase === "running" && (
         <span className="text-center text-[15px] text-pt-muted">
-          เหนื่อยหยุดได้เลย
+          {timeUp ? "กดจบเซตเพื่อบันทึกผล" : "เหนื่อยหยุดได้เลย"}
         </span>
+      )}
+
+      {/* ถามยืนยันเมื่อจะจบก่อนครบเวลา */}
+      {confirmEnd && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          className="fixed inset-0 z-50 flex items-end justify-center bg-black/40 p-4 sm:items-center"
+        >
+          <div className="flex w-full max-w-[420px] flex-col gap-4 rounded-[20px] bg-white p-5">
+            <div className="flex flex-col gap-1.5">
+              <span className="text-[20px] font-bold">ยังไม่ครบเวลา</span>
+              <span className="text-[16px] text-pt-muted">
+                เหลืออีก {fmtDuration(remainingSec)} จะจบเซตเลยไหม
+                <br />
+                ถ้าเหนื่อยหรือปวด จบได้เลย
+              </span>
+            </div>
+            <button
+              type="button"
+              onClick={() => setConfirmEnd(false)}
+              className="h-[56px] rounded-[14px] bg-pt-accent text-[17px] font-bold text-white"
+            >
+              ฝึกต่อ
+            </button>
+            <button
+              type="button"
+              onClick={doEndSet}
+              className="h-[56px] rounded-[14px] border-2 border-pt-accent bg-white text-[17px] font-bold text-pt-accent-ink"
+            >
+              จบเซต
+            </button>
+          </div>
+        </div>
       )}
     </div>
   );

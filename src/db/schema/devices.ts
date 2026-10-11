@@ -7,23 +7,22 @@ import {
   real,
   text,
 } from "drizzle-orm/pg-core";
-import { sql } from "drizzle-orm";
 
 export const devices = pgTable("devices", {
-  device_id: varchar("device_id", { length: 10 })
-  .primaryKey()
-  .notNull(),
+  device_id: varchar("device_id", { length: 10 }).primaryKey().notNull(),
   device_name: varchar("device_name", { length: 100 }).notNull(),
 
-  serial_number: varchar("serial_number", { length: 100 })
-    .notNull()
-    .unique(),
+  serial_number: varchar("serial_number", { length: 100 }).notNull().unique(),
 
-  status: varchar("status", { length: 20 })
-    .notNull()
-    .default("ACTIVE"),
+  status: varchar("status", { length: 20 }).notNull().default("ACTIVE"),
 
-  // เทเลเมทรีของอุปกรณ์ skateboard rehab — รายงานจากตัวอุปกรณ์ผ่านไฟร์มแวร์ (อุปกรณ์ส่งเข้ามาผ่าน POST /api/devices/telemetry)
+  // ---------- ของเพื่อน ----------
+  // กุญแจของบอร์ด (เก็บเป็นค่า hash) ใช้กับ PATCH /api/devices { issueKey: true }
+  api_key: text("api_key"),
+  // นัดที่เครื่องผูกอยู่ตอนนี้ (trigger ในฐานข้อมูลเขียน/ล้างให้)
+  current_appointment_id: varchar("current_appointment_id"),
+
+  // เทเลเมทรีของอุปกรณ์ skateboard rehab
   connection_status: varchar("connection_status", { length: 20 })
     .notNull()
     .default("DISCONNECTED"), // CONNECTED | DISCONNECTED
@@ -38,12 +37,9 @@ export const devices = pgTable("devices", {
     .notNull()
     .default("UNKNOWN"), // OK | WARNING | ERROR | UNKNOWN
 
-  last_seen_at: timestamp("last_seen_at"),
+  last_seen_at: timestamp("last_seen_at", { withTimezone: true }),
 
-  // ค่าสดระหว่างฝึก รายงานผ่าน POST /api/devices/telemetry
-  live_status: varchar("live_status", { length: 20 })
-    .notNull()
-    .default("IDLE"), // IDLE | RUNNING
+  live_status: varchar("live_status", { length: 20 }).notNull().default("IDLE"), // IDLE | RUNNING
 
   live_reps: integer("live_reps"), // null = ไม่ได้อยู่ระหว่างเซต
 
@@ -51,20 +47,14 @@ export const devices = pgTable("devices", {
 
   current_a: decimal("current_a", { precision: 5, scale: 2 }), // กระแสจาก Pmod ISNS20 (A)
 
-  // คำสั่งจากแอปที่รอให้อุปกรณ์มารับตอนส่ง telemetry ครั้งถัดไป
+  // คำสั่งจากแอปที่รอให้อุปกรณ์มารับตอน heartbeat ครั้งถัดไป
   pending_command: varchar("pending_command", { length: 20 }), // START | STOP | null
 
-  // นัดที่เครื่องผูกอยู่ตอนนี้ — trigger appt_bind_device เขียน/ล้างให้ตามสถานะนัด (IN_PROGRESS)
-  // บอร์ดไม่ต้องรู้ว่าวัดใคร ฐานข้อมูลโยงจากนัดไปหาผู้ป่วยเอง
-  current_appointment_id: varchar("current_appointment_id"),
-  holder_patient_id: varchar("holder_patient_id", { length: 50 }),
-
+  // ---------- ของเรา (ระบบฝึกสเก็ตบอร์ด) ----------
+  holder_patient_id: varchar("holder_patient_id", { length: 50 }), // ผู้ป่วยที่กดเชื่อมต่อเครื่องอยู่
   live_angle: real("live_angle"),
-  live_phase: varchar("live_phase", { length: 10 }),
+  live_phase: varchar("live_phase", { length: 10 }), // GO | RETURN | null
+  current_side: varchar("current_side", { length: 10 }), // RIGHT | LEFT | null
 
-  api_key: text("api_key").unique(),
-
-  created_at: timestamp("created_at")
-    .defaultNow()
-    .notNull(),
+  created_at: timestamp("created_at").defaultNow().notNull(),
 });
