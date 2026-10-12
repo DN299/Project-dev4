@@ -1,7 +1,8 @@
 import { useEffect, useState } from "react";
-import { Check, PlayCircle } from "lucide-react";
+import { Check, PlayCircle, Clock } from "lucide-react";
 import type { PatientAppointment, PatientProgram } from "../../types";
 import {
+  api,
   list,
   rangeQuery,
   addDays,
@@ -14,7 +15,17 @@ import {
   isTraining,
   ptName,
 } from "../../lib/clinic";
-import { fetchSkateSessions, skateOnDay } from "./patientSkate";
+import {
+  fetchSkateSessions,
+  skateOnDay,
+  type SkateSession,
+} from "./patientSkate";
+import {
+  SETS_ARE_PER_SIDE,
+  sidesFromAffected,
+  countBySide,
+  type Side,
+} from "./Patientside";
 
 interface Props {
   patientId: string;
@@ -23,12 +34,21 @@ interface Props {
 
 const POLL_MS = 10000;
 
+/** "10:00" ของวันนี้ → Date */
+function todayAt(hm: string) {
+  const [h, m] = hm.split(":").map(Number);
+  const d = new Date();
+  d.setHours(h || 0, m || 0, 0, 0);
+  return d;
+}
+
 export default function PatientQueuePage({ patientId, onTrain }: Props) {
   const today = startOfDay(new Date());
   const [mine, setMine] = useState<PatientAppointment[]>([]);
   const [dayAll, setDayAll] = useState<PatientAppointment[]>([]);
   const [program, setProgram] = useState<PatientProgram | null>(null);
-  const [setsToday, setSetsToday] = useState(0);
+  const [todaySets, setTodaySets] = useState<SkateSession[]>([]);
+  const [sides, setSides] = useState<Side[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -46,7 +66,12 @@ export default function PatientQueuePage({ patientId, onTrain }: Props) {
           setProgram(pp.find((p) => p.status === "ACTIVE") ?? null),
         ),
         fetchSkateSessions(patientId)
-          .then((s) => setSetsToday(skateOnDay(s, new Date()).length))
+          .then((s) => setTodaySets(skateOnDay(s, new Date())))
+          .catch(() => {}),
+        api<{ affected_side?: string | null }[]>(
+          `/api/patients?patient_id=${patientId}`,
+        )
+          .then((r) => setSides(sidesFromAffected(r[0]?.affected_side)))
           .catch(() => {}),
       ]).finally(() => setLoading(false));
     load();
@@ -116,27 +141,50 @@ export default function PatientQueuePage({ patientId, onTrain }: Props) {
       apptSlot(a) < s,
   ).length;
   const st = appt.status;
+  const setsToday = todaySets.length;
   const trained = !assess && setsToday > 0; // ฝึกกับสเก็ตบอร์ดไปแล้วอย่างน้อย 1 เซต
-  const step =
-    st === "COMPLETED"
-      ? 4
-      : st === "IN_PROGRESS" || trained
-        ? 3
-        : st === "CHECKED_IN"
-          ? 2
-          : 1;
+
+  // ทำครบตามโปรแกรมแล้วหรือยัง (นับแยกแขน: ทุกแขนต้องครบ session_per_day เซต)
+  const perDay = program?.session_per_day ?? 0;
+  const bySide = countBySide(todaySets);
+  const sidesToDo: Side[] = sides.length
+    ? sides
+    : (["RIGHT", "LEFT"] as Side[]).filter((sd) => bySide[sd] > 0);
+  const allDone =
+    !assess &&
+    perDay > 0 &&
+    (SETS_ARE_PER_SIDE && sidesToDo.length
+      ? sidesToDo.every((sd) => bySide[sd] >= perDay)
+      : setsToday >= perDay);
+
+  // เวลานัด: ฝึกได้เฉพาะช่วงนัด (ถึงเวลาจบนัด) ถ้าเลยแล้วต้องให้เคาน์เตอร์เลื่อนนัดก่อน
+  const now = new Date();
+  const reached = now >= todayAt(s) || !!appt.called_at; // ถึงเวลานัด หรือถูกเรียกคิวแล้ว
+  const expired = st !== "COMPLETED" && now > todayAt(slotEnd(s));
+  const checkedIn = st === "CHECKED_IN" || st === "IN_PROGRESS";
+
   const badge =
     st === "COMPLETED"
       ? ["เสร็จสิ้นแล้ว", "#E4F5EC", "#145C38"]
-      : trained
-        ? [`ฝึกแล้ว ${setsToday} เซต`, "#E4F5EC", "#145C38"]
-        : st === "IN_PROGRESS"
-          ? ["กำลังฝึก", "#E3EEF9", "#1F5573"]
-          : st === "CHECKED_IN" && appt.called_at
-            ? ["ถึงคิวแล้ว · เริ่มฝึกได้เลย", "#FFF0D9", "#8C420A"]
-            : st === "CHECKED_IN"
-              ? [`ก่อนหน้าคุณ ${ahead} คน`, "#E4F5EC", "#145C38"]
-              : ["ยังไม่ได้รับคิว", "#FFF0D9", "#8C420A"];
+      : expired
+        ? [
+            trained
+              ? `ฝึกแล้ว ${setsToday} เซต · หมดเวลานัด`
+              : "เลยเวลานัดแล้ว",
+            "#EEECF2",
+            "#5A566A",
+          ]
+        : allDone
+          ? ["ฝึกครบแล้ววันนี้", "#E4F5EC", "#145C38"]
+          : trained
+            ? [`ฝึกแล้ว ${setsToday} เซต`, "#E4F5EC", "#145C38"]
+            : st === "IN_PROGRESS"
+              ? ["กำลังฝึก", "#E3EEF9", "#1F5573"]
+              : st === "CHECKED_IN" && reached
+                ? ["ถึงคิวแล้ว · เริ่มฝึกได้เลย", "#FFF0D9", "#8C420A"]
+                : st === "CHECKED_IN"
+                  ? [`ก่อนหน้าคุณ ${ahead} คน`, "#E4F5EC", "#145C38"]
+                  : ["ยังไม่ได้รับคิว", "#FFF0D9", "#8C420A"];
 
   const steps = [
     {
@@ -152,25 +200,29 @@ export default function PatientQueuePage({ patientId, onTrain }: Props) {
     },
     { t: "เสร็จสิ้น", sub: "" },
   ];
-  // ลำดับขั้น: ก่อนรับคิว = ขั้น 1 ยังไม่เสร็จ · รับคิวแล้ว = ขั้น 1 เสร็จ ขั้น 2 กำลังรอ
+  // จำนวนขั้นที่เสร็จแล้ว (ติ๊กเขียว) และขั้นที่กำลังทำ (วงกลมส้ม)
   const doneUpTo =
-    st === "SCHEDULED" && !trained
-      ? 0
-      : step === 4
-        ? 4
-        : trained
-          ? 3
-          : step - 1;
-  const current =
-    st === "SCHEDULED" && !trained
-      ? 0
-      : step === 4
-        ? -1
-        : trained
-          ? 3
-          : step - 1;
+    st === "COMPLETED" || allDone
+      ? 4
+      : trained
+        ? 3
+        : st === "IN_PROGRESS"
+          ? 2
+          : checkedIn && reached
+            ? 2
+            : checkedIn
+              ? 1
+              : 0;
+  const current = st === "COMPLETED" || allDone || expired ? -1 : doneUpTo;
 
-  const canTrain = !assess && st !== "COMPLETED";
+  // ปุ่มฝึก: ต้องรับคิวแล้ว (หรือเคยฝึกวันนี้แล้ว) และยังไม่หมดเวลานัด
+  // ครบเซตตามโปรแกรมแล้ว = ฝึกต่อไม่ได้ (กันฝึกเกินขนาดที่นักกายภาพสั่ง)
+  const canTrain =
+    !assess &&
+    st !== "COMPLETED" &&
+    !expired &&
+    !allDone &&
+    (checkedIn || trained);
 
   return (
     <div className="flex flex-col gap-3.5">
@@ -228,6 +280,36 @@ export default function PatientQueuePage({ patientId, onTrain }: Props) {
           );
         })}
       </div>
+
+      {expired && (
+        <div className="flex items-start gap-3 rounded-2xl bg-white px-4 py-4">
+          <Clock size={22} className="mt-0.5 shrink-0 text-pt-muted" />
+          <div className="flex flex-col">
+            <span className="text-[16px] font-semibold">หมดเวลานัดแล้ว</span>
+            <span className="text-[15px] text-pt-muted">
+              ถ้าต้องการฝึกต่อ ติดต่อเคาน์เตอร์เพื่อเลื่อนนัด
+            </span>
+          </div>
+        </div>
+      )}
+
+      {allDone && (
+        <div className="flex items-start gap-3 rounded-2xl bg-[#E4F5EC] px-4 py-4">
+          <Check
+            size={22}
+            className="mt-0.5 shrink-0 text-[#1F9D5C]"
+            strokeWidth={2.6}
+          />
+          <div className="flex flex-col">
+            <span className="text-[16px] font-semibold text-[#145C38]">
+              ฝึกครบตามโปรแกรมแล้ววันนี้
+            </span>
+            <span className="text-[15px] text-[#2E6B1A]">
+              พักได้เลย ฝึกเกินกว่าที่นักกายภาพกำหนดอาจทำให้กล้ามเนื้อล้า
+            </span>
+          </div>
+        </div>
+      )}
 
       {canTrain && (
         <button

@@ -55,6 +55,7 @@ export const devices = pgTable("devices", {
   live_angle: real("live_angle"),
   live_phase: varchar("live_phase", { length: 10 }), // GO | RETURN | null
   current_side: varchar("current_side", { length: 10 }), // RIGHT | LEFT | null
+  set_started_at: timestamp("set_started_at", { withTimezone: true }), // เวลาเริ่มเซตที่กำลังฝึก (ฐานข้อมูลจดเองตอนบอร์ดเป็น RUNNING)
 
   created_at: timestamp("created_at").defaultNow().notNull(),
 });

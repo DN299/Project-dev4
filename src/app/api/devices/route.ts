@@ -75,6 +75,9 @@ export async function GET(req: Request) {
         live_reps: online ? d.live_reps : null,
         live_angle: online ? d.live_angle : null,
         live_phase: online ? d.live_phase : null,
+        // เวลาเริ่มเซต (จากฐานข้อมูล) ใช้นับถอยหลัง ไม่เพี้ยนแม้รีเฟรชหน้าหรือเน็ตหลุด
+        set_started_at:
+          online && d.live_status === "RUNNING" ? d.set_started_at : null,
         // ผู้ป่วยที่กด "เชื่อมต่อเครื่อง" อยู่ตอนนี้ (หน้าฝึกของผู้ป่วยใช้ค่านี้)
         // คนละอย่างกับ holder_patient_id ด้านล่าง ซึ่งมาจากนัดหมาย
         using_patient_id: online ? (d.holder_patient_id ?? null) : null,
@@ -141,7 +144,7 @@ export async function PATCH(req: Request) {
     const body = await req.json();
     if (!body.deviceId) {
       return NextResponse.json(
-        { error: "ต้องระบุ DeviceId" },
+        { error: "ต้องระบุ deviceId" },
         { status: 400, headers: cors },
       );
     }

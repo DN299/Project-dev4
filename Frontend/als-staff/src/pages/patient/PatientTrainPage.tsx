@@ -33,6 +33,7 @@ type LiveDevice = Device & {
   using_patient_id?: string | null;
   live_angle?: number | string | null;
   live_phase?: string | null;
+  set_started_at?: string | null; // เวลาเริ่มเซตจากฐานข้อมูล
 };
 
 /**
@@ -104,29 +105,178 @@ function cue() {
   }
 }
 
-/** แถบมุม: สีส้มตอนหมุนไป, สีเขียวตอนถึงเป้าแล้วหมุนกลับ */
-function AngleBar({ angle, returning }: { angle: number; returning: boolean }) {
+/**
+ * กระต่ายเก็บแครอท (แทนแถบมุมเดิม)
+ * หมุนแขนออก = กระต่ายเดินจากโพรงไปหาแครอท · ถึง 90° = หยิบแครอทแล้วหันกลับ
+ * หมุนกลับถึงจุดเริ่ม = บอร์ดนับ 1 ครั้ง = แครอทในตะกร้าเพิ่ม 1
+ * ตำแหน่งมาจากมุมจริงของบอร์ด, ขาไป/ขากลับมาจาก live_phase ของบอร์ด
+ */
+const RABBIT_X0 = 60; // ตำแหน่งที่โพรง (มุม 0°)
+const RABBIT_X1 = 262; // ตำแหน่งที่แครอท (มุม 90°)
+
+function RabbitTrack({
+  angle,
+  returning,
+  reps,
+}: {
+  angle: number;
+  returning: boolean;
+  reps: number;
+}) {
   const pct = Math.min(1, Math.max(0, angle / TARGET_ANGLE));
+  const x = RABBIT_X0 + (RABBIT_X1 - RABBIT_X0) * pct;
+  const say = returning
+    ? "ได้แครอทแล้ว หมุนกลับบ้าน"
+    : pct > 0.66
+      ? "อีกนิดเดียว"
+      : "หมุนไปเก็บแครอท";
+  const move = "transform 0.7s ease-out"; // บอร์ดส่งค่าทุก 0.5–0.8 วิ ให้เดินนุ่มๆ ระหว่างค่า
   return (
-    <div className="flex w-full flex-col gap-2">
+    <div className="flex w-full flex-col items-center gap-2">
       <span
-        className={`text-[16px] font-semibold ${returning ? "text-[#145C38]" : ""}`}
+        className={`text-[18px] font-semibold ${returning ? "text-[#145C38]" : ""}`}
+        aria-live="polite"
       >
-        {returning ? "ถึงแล้ว หมุนกลับ" : "หมุนไปให้ถึงเป้า"}
+        {say}
       </span>
-      <div
-        className="h-4 w-full overflow-hidden rounded-full bg-pt-divider"
-        role="progressbar"
-        aria-label="ระยะการหมุน"
-        aria-valuemin={0}
-        aria-valuemax={100}
-        aria-valuenow={Math.round(pct * 100)}
+      <svg
+        viewBox="0 0 320 120"
+        className="block h-auto w-full"
+        role="img"
+        aria-label={`แขนหมุนไปแล้ว ${Math.round(pct * 100)} เปอร์เซ็นต์ของเป้า`}
       >
-        <div
-          className={`h-full rounded-full transition-[width] duration-700 ease-out motion-reduce:transition-none ${returning ? "bg-[#1F9D5C]" : "bg-pt-accent"}`}
-          style={{ width: `${pct * 100}%` }}
-        />
-      </div>
+        {/* พื้นหญ้า + โพรง */}
+        <rect x="0" y="92" width="320" height="28" rx="14" fill="#CFE8C4" />
+        <ellipse cx="34" cy="94" rx="26" ry="10" fill="#8C6A4A" />
+        <ellipse cx="34" cy="92" rx="20" ry="7" fill="#5B4330" />
+        {/* แครอทที่ปลายทาง (หายไปตอนกระต่ายถืออยู่) */}
+        {!returning && (
+          <g transform="translate(290 60)">
+            <path d="M-9 0 L9 0 L0 32 Z" fill="#F08A24" />
+            <path
+              d="M-5 8 L3 8 M-3 16 L2 16"
+              stroke="#C96A12"
+              strokeWidth="2"
+              strokeLinecap="round"
+            />
+            <path
+              d="M0 0 C-10 -14 -14 -16 -16 -18 M0 0 C0 -14 2 -18 0 -22 M0 0 C8 -12 12 -14 16 -16"
+              stroke="#3E9B3A"
+              strokeWidth="4"
+              fill="none"
+              strokeLinecap="round"
+            />
+          </g>
+        )}
+        {/* กระต่าย */}
+        <g style={{ transform: `translate(${x}px, 0px)`, transition: move }}>
+          <g
+            style={{
+              transform: `scaleX(${returning ? -1 : 1})`,
+              transition: "transform 0.2s",
+            }}
+          >
+            <ellipse
+              cx="6"
+              cy="38"
+              rx="6"
+              ry="20"
+              fill="#fff"
+              stroke="#BDB6CC"
+              strokeWidth="2"
+              transform="rotate(-10 6 38)"
+            />
+            <ellipse
+              cx="18"
+              cy="38"
+              rx="6"
+              ry="20"
+              fill="#fff"
+              stroke="#BDB6CC"
+              strokeWidth="2"
+              transform="rotate(12 18 38)"
+            />
+            <ellipse
+              cx="6"
+              cy="40"
+              rx="2.5"
+              ry="12"
+              fill="#F6B9C6"
+              transform="rotate(-10 6 40)"
+            />
+            <ellipse
+              cx="18"
+              cy="40"
+              rx="2.5"
+              ry="12"
+              fill="#F6B9C6"
+              transform="rotate(12 18 40)"
+            />
+            <ellipse
+              cx="-6"
+              cy="78"
+              rx="24"
+              ry="17"
+              fill="#fff"
+              stroke="#BDB6CC"
+              strokeWidth="2"
+            />
+            <circle
+              cx="-30"
+              cy="74"
+              r="7"
+              fill="#fff"
+              stroke="#BDB6CC"
+              strokeWidth="2"
+            />
+            <circle
+              cx="12"
+              cy="62"
+              r="15"
+              fill="#fff"
+              stroke="#BDB6CC"
+              strokeWidth="2"
+            />
+            <circle cx="18" cy="59" r="2.6" fill="#1F1D2B" />
+            <circle cx="26" cy="65" r="2.4" fill="#F28CA3" />
+            <ellipse
+              cx="4"
+              cy="94"
+              rx="9"
+              ry="4"
+              fill="#fff"
+              stroke="#BDB6CC"
+              strokeWidth="2"
+            />
+            {returning && (
+              <g transform="translate(30 70) rotate(-60)">
+                <path d="M-6 0 L6 0 L0 22 Z" fill="#F08A24" />
+                <path
+                  d="M0 0 C-6 -8 -8 -10 -10 -11 M0 0 C6 -8 8 -9 10 -10"
+                  stroke="#3E9B3A"
+                  strokeWidth="3"
+                  fill="none"
+                  strokeLinecap="round"
+                />
+              </g>
+            )}
+          </g>
+        </g>
+      </svg>
+      {/* ตะกร้าแครอท = จำนวนครั้งที่ทำได้ */}
+      {reps > 0 && (
+        <span
+          className="text-center text-[22px] leading-snug"
+          aria-label={`เก็บแครอทได้ ${reps} อัน`}
+        >
+          {"🥕".repeat(Math.min(reps, 10))}
+          {reps > 10 && (
+            <span className="ml-1 text-[16px] font-semibold text-pt-muted">
+              +{reps - 10}
+            </span>
+          )}
+        </span>
+      )}
     </div>
   );
 }
@@ -218,8 +368,13 @@ export default function PatientTrainPage({ patientId, onBack }: Props) {
   useEffect(() => {
     if (phase !== "running") return;
     if (busyAction === "start") setBusyAction(null);
-    if (runStartedAt.current === null) runStartedAt.current = Date.now();
-  }, [phase, busyAction]);
+    // ใช้เวลาเริ่มจากฐานข้อมูลก่อน → รีเฟรชหน้า/เน็ตหลุดแล้วกลับมา เวลายังต่อจากเดิม
+    const srv = device?.set_started_at
+      ? Date.parse(device.set_started_at)
+      : NaN;
+    if (!isNaN(srv)) runStartedAt.current = srv;
+    else if (runStartedAt.current === null) runStartedAt.current = Date.now();
+  }, [phase, busyAction, device?.set_started_at]);
 
   // ---------- โหลดครั้งแรก ----------
   useEffect(() => {
@@ -253,7 +408,9 @@ export default function PatientTrainPage({ patientId, onBack }: Props) {
   useEffect(() => {
     const tick = setInterval(() => {
       setElapsed(
-        runStartedAt.current ? (Date.now() - runStartedAt.current) / 1000 : 0,
+        runStartedAt.current
+          ? Math.max(0, (Date.now() - runStartedAt.current) / 1000)
+          : 0,
       );
     }, 1000);
     const poll = setInterval(() => {
@@ -358,6 +515,34 @@ export default function PatientTrainPage({ patientId, onBack }: Props) {
 
   const backLocked = phase === "running" || busyAction === "stop";
 
+  // กันออกจากหน้าระหว่างฝึก: ปุ่ม Back ของเบราว์เซอร์, ปัดย้อนกลับบนมือถือ, รีเฟรช/ปิดแท็บ
+  const [leaveWarn, setLeaveWarn] = useState(false);
+  useEffect(() => {
+    if (!backLocked) return;
+    // ใส่ประวัติหลอกไว้ 1 ชั้น พอกด Back จะเด้งกลับมาหน้านี้แทนการออก
+    window.history.pushState({ trainLock: true }, "");
+    const onPop = () => {
+      window.history.pushState({ trainLock: true }, "");
+      setLeaveWarn(true);
+    };
+    const onUnload = (e: BeforeUnloadEvent) => {
+      e.preventDefault();
+      e.returnValue = ""; // เบราว์เซอร์จะถามยืนยันเองตอนรีเฟรช/ปิดแท็บ
+    };
+    window.addEventListener("popstate", onPop);
+    window.addEventListener("beforeunload", onUnload);
+    return () => {
+      window.removeEventListener("popstate", onPop);
+      window.removeEventListener("beforeunload", onUnload);
+      if (window.history.state?.trainLock) window.history.back(); // เอาประวัติหลอกออก
+    };
+  }, [backLocked]);
+  useEffect(() => {
+    if (!leaveWarn) return;
+    const t = setTimeout(() => setLeaveWarn(false), 3000);
+    return () => clearTimeout(t);
+  }, [leaveWarn]);
+
   const goBack = () => {
     if (backLocked) return; // กำลังฝึกอยู่ กลับไม่ได้ ต้องกดจบเซตก่อน
     onBack();
@@ -434,6 +619,9 @@ export default function PatientTrainPage({ patientId, onBack }: Props) {
       ? sidesToDo.every((sd) => bySide[sd] >= totalSets)
       : todaySessions.length >= totalSets);
 
+  // ครบเซตตามโปรแกรมแล้ว: เริ่มเซตใหม่ไม่ได้ (กันฝึกเกินขนาดที่นักกายภาพสั่ง)
+  const lockedDone = allDone && (phase === "available" || phase === "ready");
+
   const status = {
     none: { text: "ไม่พบเครื่องฝึก", tone: "muted" },
     offline: { text: "เครื่องปิดอยู่", tone: "muted" },
@@ -445,26 +633,29 @@ export default function PatientTrainPage({ patientId, onBack }: Props) {
 
   const hint = loading
     ? "กำลังโหลด..."
-    : phase === "none"
-      ? "แจ้งนักกายภาพ"
-      : phase === "offline"
-        ? "เปิดเครื่องแล้วรอสักครู่"
-        : phase === "busy"
-          ? "รอผู้ป่วยท่านก่อนหน้าฝึกเสร็จ"
-          : phase === "available"
-            ? "กดเชื่อมต่อเพื่อเริ่ม"
-            : phase === "ready"
-              ? imuError
-                ? "รอเซ็นเซอร์กลับมาปกติ"
-                : "พร้อมแล้ว กดเริ่มเซต"
-              : busyAction === "stop"
-                ? "กำลังบันทึกผล..."
-                : imuError
-                  ? "เซ็นเซอร์มีปัญหา แจ้งนักกายภาพ"
-                  : "ทำเท่าที่ไหว";
+    : lockedDone
+      ? "ทำครบตามโปรแกรมแล้ว พักได้เลย"
+      : phase === "none"
+        ? "แจ้งนักกายภาพ"
+        : phase === "offline"
+          ? "เปิดเครื่องแล้วรอสักครู่"
+          : phase === "busy"
+            ? "รอผู้ป่วยท่านก่อนหน้าฝึกเสร็จ"
+            : phase === "available"
+              ? "กดเชื่อมต่อเพื่อเริ่ม"
+              : phase === "ready"
+                ? imuError
+                  ? "รอเซ็นเซอร์กลับมาปกติ"
+                  : "พร้อมแล้ว กดเริ่มเซต"
+                : busyAction === "stop"
+                  ? "กำลังบันทึกผล..."
+                  : imuError
+                    ? "เซ็นเซอร์มีปัญหา แจ้งนักกายภาพ"
+                    : "ทำเท่าที่ไหว";
 
-  const primary =
-    phase === "available"
+  const primary = lockedDone
+    ? { label: "ฝึกครบแล้ววันนี้", onClick: () => {}, filled: false }
+    : phase === "available"
       ? {
           label:
             busyAction === "claim" ? "กำลังเชื่อมต่อ..." : "เชื่อมต่อเครื่อง",
@@ -493,6 +684,7 @@ export default function PatientTrainPage({ patientId, onBack }: Props) {
     phase === "none" ||
     phase === "offline" ||
     phase === "busy" ||
+    lockedDone ||
     (imuError && phase === "ready"); // เซ็นเซอร์เสีย ห้ามเริ่มเซต (นับไม่ได้) แต่ยังกดจบเซตได้เสมอ
 
   // ---------- หน้าผลหลังจบเซต ----------
@@ -675,7 +867,11 @@ export default function PatientTrainPage({ patientId, onBack }: Props) {
         </span>
         <span className="text-center text-[17px] text-pt-muted">{hint}</span>
         {liveAngle != null && (
-          <AngleBar angle={liveAngle} returning={returning} />
+          <RabbitTrack
+            angle={liveAngle}
+            returning={returning}
+            reps={liveReps ?? 0}
+          />
         )}
         {error && (
           <span role="alert" className="text-center text-[15px] text-[#B42318]">
@@ -729,6 +925,16 @@ export default function PatientTrainPage({ patientId, onBack }: Props) {
         <span className="text-center text-[15px] text-pt-muted">
           {timeUp ? "กดจบเซตเพื่อบันทึกผล" : "เหนื่อยหยุดได้เลย"}
         </span>
+      )}
+
+      {/* เตือนเมื่อพยายามออกระหว่างฝึก */}
+      {leaveWarn && (
+        <div
+          role="alert"
+          className="fixed inset-x-4 top-4 z-50 mx-auto max-w-[420px] rounded-2xl bg-[#1F1D2B] px-4 py-3.5 text-center text-[16px] font-semibold text-white shadow-lg"
+        >
+          กำลังฝึกอยู่ กด "จบเซต" ก่อนออกจากหน้านี้
+        </div>
       )}
 
       {/* ถามยืนยันเมื่อจะจบก่อนครบเวลา */}
