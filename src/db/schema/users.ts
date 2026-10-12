@@ -13,6 +13,9 @@ export const users = pgTable("users", {
 
   password: varchar("password", { length: 255 }).notNull(),
 
+  // คำนำหน้าชื่อ (นาย / นาง / นางสาว / เด็กชาย / เด็กหญิง)
+  title_name: varchar("title_name", { length: 20 }),
+
   first_name: varchar("first_name", { length: 50 }).notNull(),
 
   last_name: varchar("last_name", { length: 50 }).notNull(),

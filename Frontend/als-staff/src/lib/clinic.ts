@@ -72,18 +72,17 @@ export function ageFrom(birth?: string | null): number | null {
 }
 
 /* ===========================
-   ช่องเวลา (กระดานมีเครื่องเดียว ใช้ร่วมกันทั้งศูนย์ · ช่องละ 1 ชั่วโมง · ปิดวันอาทิตย์)
+   ช่องเวลา (กระดานมีเครื่องเดียว ใช้ร่วมกันทั้งศูนย์ · ช่องละ 1 ชั่วโมง)
    เปลี่ยนความยาวช่องที่ SLOT_MIN ให้ตรงกับ src/constants/slot.ts ฝั่ง backend
 =========================== */
 
 export const SLOT_MIN = 60
+// เปิด 09:00–16:00 ช่องละ 1 ชั่วโมง พักกลางวัน 12:00–13:00 (ตรงกับ src/constants/slot.ts ฝั่ง backend)
 const SLOT_STARTS = ['09:00', '10:00', '11:00', '13:00', '14:00', '15:00']
 const addMin = (s: string, m: number) => { const [h, mm] = s.split(':').map(Number); const t = h * 60 + mm + m; return `${String(Math.floor(t / 60)).padStart(2, '0')}:${String(t % 60).padStart(2, '0')}` }
 export const SLOTS: { s: string; e: string }[] = SLOT_STARTS.map(s => ({ s, e: addMin(s, SLOT_MIN) }))
 /** ลำดับช่องแรกหลังพักกลางวัน (ใช้แทรกแถว "พักกลางวัน") */
 export const LUNCH_BEFORE = SLOT_STARTS.indexOf('13:00')
-
-export const isClosedDay = (d: Date) => d.getDay() === 0
 
 export const slotDate = (day: Date, s: string) => {
   const [h, m] = s.split(':').map(Number)
@@ -112,17 +111,18 @@ export const rangeQuery = (from: Date, toExclusive: Date) =>
    สถานะคิว
 =========================== */
 
-export type QueueState = 'done' | 'now' | 'called' | 'wait' | 'notyet' | 'booked' | 'noshow' | 'cancelled' | 'assess' | 'assessed'
+export type QueueState = 'done' | 'review' | 'now' | 'called' | 'wait' | 'notyet' | 'booked' | 'noshow' | 'cancelled' | 'assess' | 'assessed'
 
 export function queueState(a: PatientAppointment, today = new Date()): QueueState {
   if (a.appointment_type === 'ASSESSMENT') {
-    if (a.status === 'COMPLETED') return 'assessed'
+    if (a.status === 'COMPLETED') return a.records_done_at ? 'assessed' : 'review'
     if (a.status === 'CANCELLED') return 'cancelled'
     if (a.status === 'NO_SHOW') return 'noshow'
     return 'assess'
   }
   switch (a.status) {
-    case 'COMPLETED': return 'done'
+    // นักกายภาพบันทึกผลแล้ว รอเวชระเบียนอ่านผลและจัดการนัดต่อ
+    case 'COMPLETED': return a.records_done_at ? 'done' : 'review'
     case 'IN_PROGRESS': return 'now'
     case 'CHECKED_IN': return a.called_at ? 'called' : 'wait'
     case 'NO_SHOW': return 'noshow'
@@ -135,15 +135,16 @@ export function queueState(a: PatientAppointment, today = new Date()): QueueStat
 /** [ข้อความ, พื้น, ตัวอักษร] — โทนเวชระเบียน/นักกายภาพ */
 export const BADGE: Record<QueueState, [string, string, string]> = {
   done: ['เสร็จ', '#E4F5EC', '#145C38'],
+  review: ['รอเวชระเบียนสรุปผล', '#FFF0D9', '#8C420A'],
   now: ['กำลังฝึก', '#E3EEF9', '#1F5573'],
   called: ['เรียกคิวแล้ว', '#E3EEF9', '#1F5573'],
   wait: ['มาแล้ว รอ', '#FFF0D9', '#8C420A'],
   notyet: ['ยังไม่มา', '#EEF1F6', '#4A5B6E'],
-  booked: ['นัด', '#EDEEFC', '#3A40C9'],
+  booked: ['นัด', '#E5F1FF', '#0066D6'],
   noshow: ['ไม่มา', '#FCEBEB', '#791F1F'],
   cancelled: ['ยกเลิก', '#EEF1F6', '#4A5B6E'],
   assess: ['รอประเมิน', '#FFF0D9', '#8C420A'],
-  assessed: ['ประเมินแล้ว', '#E4F5EC', '#145C38'],
+  assessed: ['เสร็จ', '#E4F5EC', '#145C38'], // ประเมินเสร็จ = รักษาเสร็จ
 }
 
 /* ===========================
@@ -192,7 +193,7 @@ export const BOARD_LINK_LABEL: Record<BoardLink, string> = {
   none: 'ยังไม่เชื่อมต่อ', waiting: 'รอเชื่อมต่อ', connected: 'เชื่อมต่อกระดานแล้ว', disconnected: 'ตัดการเชื่อมต่อแล้ว',
 }
 
-export type FloorState = 'treating' | 'finished' | 'free'
+export type FloorState = 'treating' | 'review' | 'finished' | 'free'
 /**
  * สถานะของกระดานวันนี้
  * - กำลังรักษาอยู่: มีคนฝึก หรือเรียกคิวแล้วรอนักกายภาพเชื่อมต่อ
@@ -201,6 +202,8 @@ export type FloorState = 'treating' | 'finished' | 'free'
  */
 export function floorState(todayTraining: PatientAppointment[], now = new Date()): FloorState {
   if (todayTraining.some(a => a.status === 'IN_PROGRESS' || (a.status === 'CHECKED_IN' && a.called_at))) return 'treating'
+  // นักกายภาพบันทึกผลแล้ว แต่เวชระเบียนยังไม่สรุปผล/ลงนัดต่อ → ยังเรียกคิวถัดไปไม่ได้
+  if (todayTraining.some(a => a.status === 'COMPLETED' && !a.records_done_at)) return 'review'
   const last = todayTraining.filter(a => a.status === 'COMPLETED').sort((a, b) => (b.completed_at ?? '').localeCompare(a.completed_at ?? ''))[0]
   return last?.completed_at && now.getTime() - new Date(last.completed_at).getTime() < SLOT_MIN * 60000 ? 'finished' : 'free'
 }
@@ -212,7 +215,7 @@ export function floorState(todayTraining: PatientAppointment[], now = new Date()
 export const SOAP_FIELDS = ['S', 'O', 'A', 'P'] as const
 export type SoapField = (typeof SOAP_FIELDS)[number]
 export const SOAP_LABEL: Record<SoapField, string> = {
-  S: 'S · อาการที่ผู้ป่วยเล่า', O: 'O · สิ่งที่ตรวจวัดได้', A: 'A · การประเมินของนักกายภาพ', P: 'P · แผนและคำแนะนำ',
+  S: 'ข้อมูลการสอบถามเพิ่มจากผู้ป่วย', O: 'ผลการกายภาพ', A: 'ผลการประเมินอาการ', P: 'แผนและคำแนะนำ',
 }
 
 export function effectiveSoap(a: PatientAppointment, amendments: { appointment_id: string; field: string; new_value: string | null; amended_at: string }[]) {

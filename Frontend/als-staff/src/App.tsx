@@ -9,6 +9,7 @@ import DashboardPage from './pages/staff/DashboardPage'
 import RegisterPage from './pages/staff/RegisterPage'
 import QueuePage from './pages/staff/QueuePage'
 import PatientHistoryPage from './pages/staff/PatientHistoryPage'
+import PatientsPage from './pages/staff/PatientsPage'
 import TreatmentStatusPage from './pages/staff/TreatmentStatusPage'
 import TherapistHomePage from './pages/therapist/HomePage'
 import MyCasesPage from './pages/therapist/MyCasesPage'
@@ -25,7 +26,7 @@ import PatientSummaryPage from './pages/patient/PatientSummaryPage'
 
 interface Session { token: string; user: AuthUser }
 
-const STAFF_PAGES: PageKey[] = ['dashboard', 'register', 'queue', 'rec-patient', 'status', 'schedule', 'programs']
+const STAFF_PAGES: PageKey[] = ['dashboard', 'register', 'patients', 'queue', 'rec-patient', 'status', 'schedule']
 const THERAPIST_PAGES: PageKey[] = ['my-home', 'my-cases', 'case', 'assess', 'my-schedule', 'programs']
 const PATIENT_PAGES: PageKey[] = ['patient-home', 'patient-queue', 'patient-appointments', 'patient-stats', 'patient-feedback', 'patient-profile', 'patient-train', 'patient-summary']
 
@@ -40,9 +41,15 @@ const loadSession = (): Session | null => {
 export default function App() {
   const [session, setSession] = useState<Session | null>(loadSession)
   const [page, setPage] = useState<PageKey>(() => homeOf(loadSession()?.user.role_id ?? ''))
+  // คำขอนัดที่กดมาจากหน้าสถานะ → หน้าตารางนัดเปิดโหมดลงนัดให้ทันที
+  const [bookRequest, setBookRequest] = useState<string | null>(null)
   // ผู้ป่วยที่เปิดดูอยู่ (หน้าเคส / ประวัติการรักษา) และนัดประเมินที่กำลังทำ
   const [patientTarget, setPatientTarget] = useState<string | null>(null)
   const [assessTarget, setAssessTarget] = useState<string | null>(null)
+  // หน้าประวัติการรักษา (เวชระเบียน) เปิดมาจากหน้าไหน — ปุ่มกลับพากลับไปที่นั่น
+  const [historyBack, setHistoryBack] = useState<PageKey>('queue')
+  // หน้าเคสของนักกายภาพเปิดที่แท็บไหน (เคสของฉัน → ประวัติการรักษา)
+  const [caseTab, setCaseTab] = useState<'today' | 'history'>('today')
   const [lastSet, setLastSet] = useState<TherapySession | null>(null)
 
   const handleLogin = (token: string, user: AuthUser) => {
@@ -68,7 +75,8 @@ export default function App() {
   if (current === 'assess' && !assessTarget) current = 'my-home'
 
   const goto = (p: PageKey) => { setPage(p); window.scrollTo(0, 0) }
-  const openPatient = (patientId: string) => { setPatientTarget(patientId); goto(isTherapist ? 'case' : 'rec-patient') }
+  const openPatient = (patientId: string, from: PageKey = 'queue') => { setPatientTarget(patientId); setHistoryBack(from); setCaseTab('today'); goto(isTherapist ? 'case' : 'rec-patient') }
+  const openCaseHistory = (patientId: string) => { setPatientTarget(patientId); setCaseTab('history'); goto('case') }
   const openAssess = (appointmentId: string) => { setAssessTarget(appointmentId); goto('assess') }
 
   if (isPatient) {
@@ -94,6 +102,7 @@ export default function App() {
                 session={lastSet}
                 onHome={() => goto('patient-home')}
                 onHistory={() => goto('patient-stats')}
+                onNextSet={() => goto('patient-train')}
               />
             )}
           </div>
@@ -117,21 +126,22 @@ export default function App() {
   }
 
   return (
-    <div className="flex min-h-screen flex-wrap bg-rx-bg font-rx text-rx-ink md:flex-nowrap">
+    <div className="flex min-h-screen flex-wrap bg-rx-gradient font-rx text-rx-ink md:flex-nowrap">
       <Sidebar page={current} onNavigate={goto} user={user} onLogout={handleLogout} />
       <main className="min-w-0 flex-1 px-4 pb-12 pt-6 sm:px-6">
         <div className="flex max-w-[1200px] flex-col gap-6">
           {current === 'dashboard'   && <DashboardPage />}
           {current === 'register'    && <RegisterPage user={user} onDone={() => goto('queue')} />}
+          {current === 'patients'    && <PatientsPage onOpenHistory={id => openPatient(id, 'patients')} />}
           {current === 'queue'       && <QueuePage user={user} onOpenPatient={openPatient} />}
-          {current === 'rec-patient' && patientTarget && <PatientHistoryPage patientId={patientTarget} onBack={() => goto('queue')} />}
-          {current === 'status'      && <TreatmentStatusPage user={user} />}
-          {current === 'schedule'    && <SchedulePage user={user} />}
+          {current === 'rec-patient' && patientTarget && <PatientHistoryPage patientId={patientTarget} backLabel={historyBack === 'patients' ? 'กลับไปผู้ป่วยทั้งหมด' : historyBack === 'status' ? 'กลับไปหน้าสถานะ' : 'กลับไปคิวผู้ป่วย'} onBack={() => goto(historyBack)} />}
+          {current === 'status'      && <TreatmentStatusPage user={user} onOpenHistory={id => openPatient(id, 'status')} onGoSchedule={rid => { setBookRequest(rid ?? null); goto('schedule') }} />}
+          {current === 'schedule'    && <SchedulePage user={user} bookRequestId={bookRequest} onBookingHandled={() => setBookRequest(null)} />}
           {current === 'my-schedule' && <SchedulePage user={user} />}
           {current === 'programs'    && <ProgramLibraryPage user={user} />}
           {current === 'my-home'     && <TherapistHomePage user={user} onOpenCase={openPatient} onAssess={openAssess} />}
-          {current === 'my-cases'    && <MyCasesPage user={user} onOpenCase={openPatient} />}
-          {current === 'case'        && patientTarget && <CasePage user={user} patientId={patientTarget} onBack={() => goto('my-cases')} />}
+          {current === 'my-cases'    && <MyCasesPage user={user} onOpenCase={openCaseHistory} />}
+          {current === 'case'        && patientTarget && <CasePage key={`${patientTarget}-${caseTab}`} user={user} patientId={patientTarget} initialTab={caseTab} onBack={() => goto('my-cases')} />}
           {current === 'assess'      && assessTarget && <AssessPage user={user} appointmentId={assessTarget} onBack={() => goto('my-home')} onDone={openPatient} />}
         </div>
       </main>

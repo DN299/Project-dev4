@@ -13,7 +13,7 @@ export function PatientHeader({ patient, programs, badge, extra, showPt }: { pat
       <div className="flex flex-[1_1_260px] flex-col gap-1.5">
         <div className="flex flex-wrap items-center gap-2.5">
           <span className="text-[20px] font-semibold">{fullName(patient.first_name, patient.last_name)}</span>
-          {badge ?? <Badge label={stageLabel(patient.current_stage)} bg="#EDEEFC" fg="#3A40C9" />}
+          {badge ?? <Badge label={stageLabel(patient.current_stage)} bg="#E5F1FF" fg="#0066D6" />}
         </div>
         <div className="flex flex-wrap gap-2 text-[12px] text-rx-muted">
           {meta.map((m, i) => <span key={i}>{i > 0 && <span className="mr-2">·</span>}{m}</span>)}
@@ -39,7 +39,11 @@ export function VisitCard({ a, sessions, patient, variant, amendments = [] }: { 
   const day = new Date(a.appointment_date)
   const isToday = sameDay(day, new Date())
 
-  const setChips = sets.map((s, i) => <Chip key={s.session_id}>เซต {i + 1}: ทำได้ {s.total_reps} ครั้ง</Chip>)
+  // ข้างที่ฝึกของแต่ละเซต (ผู้ป่วยที่รักษาทั้งสองข้าง) และโปรแกรม/ข้างที่รักษาครั้งนั้น
+  const sideOf = (s: TherapySession) => (s.side === 'LEFT' ? ' (ซ้าย)' : s.side === 'RIGHT' ? ' (ขวา)' : '')
+  const setChips = sets.map((s, i) => <Chip key={s.session_id}>เซต {i + 1}{a.treated_side === 'ทั้งสองข้าง' ? sideOf(s) : ''}: ทำได้ {s.total_reps} ครั้ง</Chip>)
+  const plan = [sets[0]?.program_name, a.treated_side].filter(Boolean).join(' · ')
+  const planChip = plan ? <span className="rounded-lg bg-rx-tint px-2.5 py-[3px] text-[12px] font-semibold text-rx-accent-ink">{plan}</span> : null
 
   if (variant === 'therapist') {
     return (
@@ -66,7 +70,7 @@ export function VisitCard({ a, sessions, patient, variant, amendments = [] }: { 
           <div className="flex flex-wrap gap-1.5">
             {live && <Chip>ช่อง {slotLabel(apptSlot(a))}</Chip>}
             {live && a.device_name && <Chip>กระดาน {a.device_name}</Chip>}
-            {setChips}
+            {planChip}{setChips}
             {fatigue != null && <Chip>เหนื่อย {fatigue.toFixed(fatigue % 1 ? 1 : 0)}/5</Chip>}
           </div>
         )}
@@ -100,7 +104,7 @@ export function VisitCard({ a, sessions, patient, variant, amendments = [] }: { 
         <div className="flex flex-col gap-2.5">
           <div className="flex flex-wrap gap-1.5">
             <span className="rounded-lg bg-rx-bg px-2.5 py-[3px] text-[12px] font-semibold">รวม {total} ครั้ง</span>
-            {setChips}
+            {planChip}{setChips}
             {fatigue != null && <Chip>ความเหนื่อยระดับ {fatigue.toFixed(fatigue % 1 ? 1 : 0)}</Chip>}
             {a.weight_kg != null && <Chip>น้ำหนัก {a.weight_kg} กก.</Chip>}
           </div>

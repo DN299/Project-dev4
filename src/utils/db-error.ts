@@ -13,6 +13,8 @@ const CONSTRAINT_MESSAGE: Record<string, string> = {
   one_open_case_per_patient: 'ผู้ป่วยมีเคสที่ยังไม่ปิดอยู่แล้ว',
   one_row_per_set: 'บันทึกเซตนี้ไปแล้ว',
   appointments_training_needs_device: 'นัดฝึกต้องผูกกับกระดาน',
+  one_pending_request_per_case: 'ผู้ป่วยมีข้อความนัดที่รอเวชระเบียนลงนัดอยู่แล้ว',
+  appointment_requests_window_chk: 'ช่วงวันที่ขอนัดไม่ถูกต้อง',
 }
 
 /** แปลงข้อผิดพลาดจากฐานข้อมูลเป็น { status, error } สำหรับตอบกลับ API */
@@ -23,5 +25,8 @@ export function dbError(error: any): { status: number; error: string } {
   // raise exception จาก trigger (appt_status_guard, lock_saved_soap, session_guard) — ข้อความเป็นภาษาไทยอยู่แล้ว
   if (code === 'P0001') return { status: 409, error: error?.cause?.message ?? error.message }
   if (code === '23505') return { status: 409, error: 'ข้อมูลนี้ซ้ำกับที่มีอยู่ในระบบแล้ว (เช่น เบอร์โทรหรืออีเมล)' }
-  return { status: 500, error: error?.message ?? 'เกิดข้อผิดพลาด' }
+  // ข้อผิดพลาดอื่น: แสดงข้อความจริงจาก Postgres (อยู่ใน cause) แทน "Failed query: ..." ที่ไม่บอกสาเหตุ
+  console.error('[db]', code ?? '', error?.cause ?? error)
+  const cause = error?.cause?.message
+  return { status: 500, error: cause ? `บันทึกไม่สำเร็จ: ${cause}${code ? ` (${code})` : ''}` : error?.message ?? 'เกิดข้อผิดพลาด' }
 }

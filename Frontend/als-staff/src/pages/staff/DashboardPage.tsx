@@ -1,21 +1,22 @@
 import { useEffect, useMemo, useState } from 'react'
-import { CalendarDays, UserCheck, Users } from 'lucide-react'
+import { CalendarDays, ChevronLeft, ChevronRight, UserCheck, Users } from 'lucide-react'
 import type { Patient, PatientAppointment } from '../../types'
 import {
-  list, rangeQuery, addDays, startOfDay, isoDate, fromIsoDate, thaiDate, mondayOf, sameDay,
+  list, rangeQuery, addDays, startOfDay, isoDate, mondayOf, sameDay,
   MON, MONTH, STAGES, STAGE_LABEL,
 } from '../../lib/clinic'
 import { Loading } from '../../components/ui'
 
 const VISITED = ['CHECKED_IN', 'IN_PROGRESS', 'COMPLETED']
-const STAGE_COLOR = { EARLY: '#4D53E0', MIDDLE: '#00A5FF', LATE: '#FFA100' } as const
+const STAGE_COLOR = { EARLY: '#007AFF', MIDDLE: '#32ADE6', LATE: '#FF9500' } as const
 
 type Bar = { v: number; l: string; cur: boolean; pick?: () => void }
 
 export default function DashboardPage() {
   const today = startOfDay(new Date())
-  const [from, setFrom] = useState(() => addDays(today, -29))
-  const [to, setTo] = useState(today)
+  // ช่วงข้อมูลของกราฟรายเดือน: 30 วันล่าสุดถึงวันนี้
+  const from = addDays(today, -29)
+  const to = today
   const [gran, setGran] = useState<'week' | 'month'>('week')
   const [pv, setPv] = useState(0) // เลื่อนเดือน (รายสัปดาห์)
   const [drill, setDrill] = useState<Date | null>(null) // วันจันทร์ของสัปดาห์ที่เจาะดู
@@ -53,18 +54,14 @@ export default function DashboardPage() {
 
   if (loading) return <Loading />
 
-  // KPI ในช่วงที่เลือก
-  // KPI: นัดวันนี้ และผู้ป่วยที่เข้ามาเดือนนี้ (นับคนไม่ซ้ำ)
+  // KPI: นัดวันนี้
   const todayAppts = appts.filter(a => sameDay(new Date(a.appointment_date), today) && a.status !== 'CANCELLED')
-  const nDone = todayAppts.filter(a => a.status === 'COMPLETED').length
-  const nNow = todayAppts.filter(a => a.status === 'IN_PROGRESS').length
-  const thisMonth = appts.filter(a => { const d = new Date(a.appointment_date); return d >= thisMonthStart && d <= addDays(today, 1) && VISITED.includes(a.status) })
-  const monthPatients = new Set(thisMonth.map(a => a.patient_id)).size
-  const monthVisits = thisMonth.length
+  // ผู้ป่วยที่ลงทะเบียนเข้าศูนย์ใหม่ในเดือนนี้
+  const newThisMonth = patients.filter(p => p.register_date && new Date(p.register_date) >= thisMonthStart).length
 
   // กราฟ
   let bars: Bar[] = []
-  let unitText = '', periodLabel = ''
+  let periodLabel = ''
   const fmtR = (a: Date, b: Date) => a.getMonth() === b.getMonth()
     ? `${a.getDate()}–${b.getDate()} ${MON[b.getMonth()]} ${b.getFullYear() + 543}`
     : `${a.getDate()} ${MON[a.getMonth()]} – ${b.getDate()} ${MON[b.getMonth()]} ${b.getFullYear() + 543}`
@@ -72,7 +69,6 @@ export default function DashboardPage() {
     const L = ['จ', 'อ', 'พ', 'พฤ', 'ศ', 'ส', 'อา']
     bars = L.map((l, i) => { const d = addDays(drill, i); return { v: d <= today ? visitsOn(d) : 0, l: `${l} ${d.getDate()}`, cur: sameDay(d, today) } })
     periodLabel = `สัปดาห์ ${fmtR(drill, addDays(drill, 6))}`
-    unitText = 'แยกรายวัน · จำนวนครั้งที่มารับบริการ'
   } else if (gran === 'week') {
     for (let d = monthStart; d <= monthEnd;) {
       const wEnd = [addDays(d, 6 - ((d.getDay() + 6) % 7)), monthEnd].reduce((a, b) => (a < b ? a : b))
@@ -81,7 +77,6 @@ export default function DashboardPage() {
       d = addDays(wEnd, 1)
     }
     periodLabel = `เดือน${MONTH[monthStart.getMonth()]} ${monthStart.getFullYear() + 543}`
-    unitText = 'แยกรายสัปดาห์ · กดแท่งเพื่อดูรายวันของสัปดาห์นั้น'
   } else {
     for (let y = from.getFullYear(), m = from.getMonth(); y < to.getFullYear() || (y === to.getFullYear() && m <= to.getMonth());) {
       const first = new Date(y, m, 1), last = new Date(y, m + 1, 0)
@@ -91,7 +86,6 @@ export default function DashboardPage() {
       m++; if (m > 11) { m = 0; y++ }
     }
     periodLabel = `${MON[from.getMonth()]} ${from.getFullYear() + 543} – ${MON[to.getMonth()]} ${to.getFullYear() + 543}`
-    unitText = 'แยกรายเดือนตามช่วงวันที่ที่เลือก · กดแท่งเพื่อดูรายสัปดาห์'
   }
   const mx = Math.max(1, ...bars.map(b => b.v))
   const gridStyle = { gridTemplateColumns: `repeat(${bars.length}, minmax(0, 1fr))`, gap: bars.length > 5 ? 12 : 20 }
@@ -99,101 +93,103 @@ export default function DashboardPage() {
   // ระยะอาการ
   const staged = patients.filter(p => p.current_stage && p.current_stage in STAGE_LABEL)
   const pct = (s: string) => (staged.length ? Math.round((staged.filter(p => p.current_stage === s).length / staged.length) * 100) : 0)
-  const top = staged.length ? STAGES.reduce((a, b) => (pct(b) > pct(a) ? b : a)) : null
+  // ระยะที่ % สูงสุด — ถ้า % เท่ากันแสดงทุกระยะที่เท่ากัน
+  const maxPct = Math.max(...STAGES.map(pct))
+  const top = staged.length ? STAGES.filter(s => pct(s) === maxPct) : []
 
-  const tgl = (on: boolean) => `h-[34px] rounded-md px-4 text-[13px] font-semibold ${on ? 'bg-rx-accent text-white' : 'bg-transparent text-rx-muted'}`
-  const dateCls = 'h-[38px] rounded-lg border border-rx-line bg-white px-2.5 text-[14px] text-rx-ink'
+  const tgl = (on: boolean) => `h-8 rounded-full px-4 text-[13px] text-rx-ink ${on ? 'bg-white font-semibold shadow-[0_2px_6px_rgba(0,0,0,0.10),0_1px_1px_rgba(0,0,0,0.04)]' : 'bg-transparent font-medium'}`
+  const navBtn = 'flex h-7 w-7 items-center justify-center rounded-full text-rx-accent transition-colors hover:bg-white'
+  const panel = 'flex min-w-0 flex-col rx-card'
 
   return (
     <>
-      <div className="flex flex-wrap items-end justify-between gap-3">
-        <div className="flex flex-col gap-1">
-          <h1 className="m-0 text-[30px] font-semibold">แดชบอร์ด</h1>
-          <span className="text-[14px] text-rx-muted">ภาพรวมศูนย์ · {thaiDate(from)} ถึง {thaiDate(to)}</span>
-        </div>
-        <div className="ml-auto flex flex-wrap items-center gap-2 rounded-lg bg-white px-3 py-2">
-          <CalendarDays size={18} className="text-rx-muted" />
-          <label htmlFor="from" className="text-[13px] text-rx-muted">ตั้งแต่</label>
-          <input id="from" type="date" className={dateCls} value={isoDate(from)} max={isoDate(to)} onChange={e => e.target.value && setFrom(fromIsoDate(e.target.value))} />
-          <label htmlFor="to" className="text-[13px] text-rx-muted">ถึง</label>
-          <input id="to" type="date" className={dateCls} value={isoDate(to)} min={isoDate(from)} max={isoDate(today)} onChange={e => { if (e.target.value) { setTo(fromIsoDate(e.target.value)); setPv(0); setDrill(null) } }} />
-        </div>
+      <div className="flex flex-wrap items-center gap-4">
+        <h1 className="m-0 text-[28px] font-bold leading-tight">แดชบอร์ด</h1>
       </div>
 
-      <div className="grid grid-cols-[repeat(auto-fit,minmax(240px,1fr))] gap-6">
+      <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
         {[
-          { title: 'ผู้ป่วยทั้งหมด', value: `${patients.length} คน`, sub: `กำลังรักษา ${patients.filter(p => p.case_status === 'ACTIVE').length} · รอประเมิน ${patients.filter(p => p.case_status === 'PENDING_ASSESSMENT').length}`, icon: Users },
-          { title: 'ผู้ป่วยที่เข้ามาเดือนนี้', value: `${monthPatients} คน`, sub: `มารับบริการ ${monthVisits} ครั้ง · ${MONTH[today.getMonth()]}`, icon: UserCheck },
-          { title: 'นัดวันนี้', value: `${todayAppts.length} นัด`, sub: `เสร็จแล้ว ${nDone} · กำลังฝึก ${nNow}`, icon: CalendarDays, bar: todayAppts.length ? Math.round((nDone / todayAppts.length) * 100) : 0 },
+          { title: 'ผู้ป่วยทั้งหมด', value: patients.length, unit: 'คน', icon: Users, tile: 'bg-[#007AFF]' },
+          { title: 'ผู้ป่วยเพิ่มขึ้นเดือนนี้', value: newThisMonth, unit: 'คน', icon: UserCheck, tile: 'bg-[#34C759]' },
+          { title: 'นัดวันนี้', value: todayAppts.length, unit: 'นัด', icon: CalendarDays, tile: 'bg-[#FF9500]' },
         ].map(k => (
-          <div key={k.title} className="flex min-w-0 flex-col gap-2 rounded-lg bg-white px-7 py-6">
-            <div className="flex items-center justify-between gap-2">
-              <span className="text-[16px] font-semibold">{k.title}</span>
-              <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-rx-tint text-rx-accent"><k.icon size={20} /></div>
+          <div key={k.title} className={`${panel} flex-row items-start justify-between gap-3 px-5 py-4`}>
+            <div className="flex min-w-0 flex-col gap-1">
+              <span className="text-[14px] text-rx-muted">{k.title}</span>
+              <span className="flex items-baseline gap-2">
+                <span className="text-[30px] font-bold leading-tight">{k.value}</span>
+                <span className="text-[14px] text-rx-muted">{k.unit}</span>
+              </span>
             </div>
-            <span className="text-[30px] font-semibold">{k.value}</span>
-            <span className="text-[13px] text-rx-muted">{k.sub}</span>
-            {k.bar !== undefined && (
-              <div className="mt-1 h-1.5 rounded-full bg-rx-divider"><div className="h-1.5 rounded-full bg-[#43BC13]" style={{ width: `${k.bar}%` }} /></div>
-            )}
+            <div className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-[9px] text-white ${k.tile}`}><k.icon size={19} /></div>
           </div>
         ))}
       </div>
 
-      <div className="flex flex-wrap items-stretch gap-6">
-        <div className="flex min-w-0 flex-[3_1_440px] flex-col gap-3.5 rounded-lg bg-white px-7 py-6">
-          <div className="flex flex-wrap items-center justify-between gap-2">
-            <div className="flex flex-col">
-              <span className="text-[20px] font-semibold">ผู้ป่วยที่เข้ามารับบริการ</span>
-              <span className="text-[13px] text-rx-muted">{unitText}</span>
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
+        <div className={`${panel} gap-5 px-6 py-5 lg:col-span-2`}>
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div className="flex flex-col gap-1.5">
+              <span className="text-[15px] font-semibold">ผู้ป่วยที่เข้ามารับบริการ</span>
               {gran === 'week' && drill && (
-                <button type="button" onClick={() => setDrill(null)} className="mt-1.5 h-8 self-start rounded-lg border border-rx-line bg-white px-3 text-[13px] font-semibold text-rx-accent">← กลับไปรายสัปดาห์ของเดือน</button>
-              )}
-              {gran === 'week' ? (
-                <div className="mt-1.5 flex items-center gap-2">
-                  <button type="button" aria-label="ช่วงก่อนหน้า" onClick={() => (drill ? setDrill(addDays(drill, -7)) : setPv(pv - 1))} className="flex h-8 w-8 items-center justify-center rounded-lg border border-rx-line bg-white">‹</button>
-                  <span className="text-[15px] font-semibold text-rx-accent-deep">{periodLabel}</span>
-                  <button type="button" aria-label="ช่วงถัดไป" onClick={() => (drill ? setDrill(addDays(drill, 7)) : setPv(pv + 1))} className="flex h-8 w-8 items-center justify-center rounded-lg border border-rx-line bg-white">›</button>
-                </div>
-              ) : (
-                <span className="mt-1.5 text-[15px] font-semibold text-rx-accent-deep">{periodLabel}</span>
+                <button type="button" onClick={() => setDrill(null)} className="h-8 self-start rounded-lg px-2 text-[13px] font-semibold text-rx-accent hover:bg-rx-tint">← กลับไปรายสัปดาห์ของเดือน</button>
               )}
             </div>
-            <div className="flex gap-1 rounded-lg bg-rx-bg p-1">
-              <button type="button" onClick={() => { setGran('week'); setPv(0); setDrill(null) }} className={tgl(gran === 'week')}>รายสัปดาห์</button>
-              <button type="button" onClick={() => { setGran('month'); setDrill(null) }} className={tgl(gran === 'month')}>รายเดือน</button>
+            <div className="flex flex-wrap items-center gap-3">
+              <div className="flex items-center gap-1 rounded-full bg-rx-fill p-0.5">
+                {gran === 'week' && <button type="button" aria-label="ช่วงก่อนหน้า" onClick={() => (drill ? setDrill(addDays(drill, -7)) : setPv(pv - 1))} className={navBtn}><ChevronLeft size={16} /></button>}
+                <span className="px-2 text-[14px] font-semibold">{periodLabel}</span>
+                {gran === 'week' && <button type="button" aria-label="ช่วงถัดไป" onClick={() => (drill ? setDrill(addDays(drill, 7)) : setPv(pv + 1))} className={navBtn}><ChevronRight size={16} /></button>}
+              </div>
+              <div className="flex gap-0.5 rounded-full bg-rx-fill p-0.5">
+                <button type="button" onClick={() => { setGran('week'); setPv(0); setDrill(null) }} className={tgl(gran === 'week')}>รายสัปดาห์</button>
+                <button type="button" onClick={() => { setGran('month'); setDrill(null) }} className={tgl(gran === 'month')}>รายเดือน</button>
+              </div>
             </div>
           </div>
-          <div className="grid h-[210px] items-end border-b border-rx-soft" style={gridStyle}>
+          <div className="grid h-52 items-end px-2" style={gridStyle}>
             {bars.map((b, i) => (
-              <button key={i} type="button" onClick={b.pick} disabled={!b.pick} aria-label={b.l} className="flex h-full min-w-0 flex-col items-center justify-end gap-1 border-none bg-transparent p-0 disabled:cursor-default">
-                <span className="text-[11px] text-rx-muted">{b.v}</span>
-                <div className="w-full rounded-t-md" style={{ height: Math.round((b.v / mx) * 170), background: b.cur ? '#4D53E0' : '#C9CBF6' }} />
+              <button key={i} type="button" onClick={b.pick} disabled={!b.pick} aria-label={b.l} className="group flex h-full min-w-0 flex-col items-center justify-end gap-2 border-none bg-transparent p-0 disabled:cursor-default">
+                <span className={`text-[12px] ${b.cur ? 'font-semibold text-rx-ink' : 'text-rx-muted'}`}>{b.v}</span>
+                <div
+                  className={`w-full max-w-[44px] rounded-t-[8px] transition-colors ${b.cur ? 'bg-rx-accent' : 'bg-[#C7DFFF] group-enabled:group-hover:bg-rx-tint-2'}`}
+                  style={{ height: Math.max(8, Math.round((b.v / mx) * 160)) }}
+                />
               </button>
             ))}
           </div>
-          <div className="grid text-center text-[11px] text-rx-muted" style={gridStyle}>
-            {bars.map((b, i) => <span key={i} className="truncate whitespace-nowrap">{b.l}</span>)}
+          <div className="-mt-2 grid border-t border-rx-divider px-2 pt-4 text-center text-[12px]" style={gridStyle}>
+            {bars.map((b, i) => <span key={i} className={`truncate whitespace-nowrap ${b.cur ? 'font-semibold text-rx-ink' : 'text-rx-muted'}`}>{b.l}</span>)}
           </div>
         </div>
 
-        <div className="flex min-w-0 flex-[2_1_280px] flex-col gap-[18px] rounded-lg bg-white px-7 py-6">
-          <div className="flex flex-col">
-            <span className="text-[20px] font-semibold">ผู้ป่วยแยกตามระยะอาการ</span>
-            <span className="text-[13px] leading-relaxed text-rx-muted">จากผู้ป่วยทั้งหมด {patients.length} คน · ระยะที่ระบุตอนรับประวัติ</span>
+        {/* สัดส่วนผู้ป่วยแยกตามระยะอาการ: แถบสัดส่วนเส้นเดียว + รายการ */}
+        <div className={`${panel} gap-5 px-6 py-5`}>
+          <div className="flex flex-col items-start gap-2">
+            <span className="text-[15px] font-semibold">ผู้ป่วยแยกตามระยะอาการ</span>
+            {top.length > 0 && (
+              <span className="rounded-full bg-rx-tint px-2.5 py-0.5 text-[12px] font-medium text-rx-accent">ส่วนใหญ่{top.map(s => STAGE_LABEL[s]).join(' และ ')}</span>
+            )}
           </div>
-          {STAGES.map(s => (
-            <div key={s} className="flex flex-col gap-2">
-              <div className="flex items-center justify-between text-[15px]">
-                <span className="flex items-center gap-2"><span className="h-2.5 w-2.5 rounded-full" style={{ background: STAGE_COLOR[s] }} />{STAGE_LABEL[s]}</span>
-                <span className="font-semibold">{pct(s)}%</span>
-              </div>
-              <div className="h-2 rounded-full bg-rx-divider"><div className="h-2 rounded-full" style={{ width: `${pct(s)}%`, background: STAGE_COLOR[s] }} /></div>
+
+          <div className="flex flex-col gap-3">
+            <span className="text-[14px] font-semibold">สัดส่วนตามระยะ</span>
+            <div className="flex h-2 w-full gap-0.5 overflow-hidden rounded-full bg-rx-soft">
+              {STAGES.map(s => pct(s) > 0 && <div key={s} className="h-full" style={{ width: `${pct(s)}%`, background: STAGE_COLOR[s] }} />)}
             </div>
-          ))}
-          <div className="mt-1 rounded-lg bg-rx-bg px-3.5 py-3 text-[14px]">
-            {top ? <>ผู้ป่วยส่วนใหญ่อยู่ <span className="font-semibold text-rx-accent">{STAGE_LABEL[top]}</span></> : 'ยังไม่มีผู้ป่วยที่ประเมินระยะ'}
           </div>
+
+          <ul className="m-0 flex list-none flex-col gap-3 p-0" role="list">
+            {STAGES.map(s => (
+              <li key={s} className="flex items-center justify-between border-b border-rx-divider px-1 py-2.5 last:border-b-0">
+                <span className="flex items-center gap-3 text-rx-muted">
+                  <span aria-hidden="true" className="h-3 w-3 rounded-full" style={{ background: STAGE_COLOR[s] }} />
+                  {STAGE_LABEL[s]}
+                </span>
+                <span className="font-semibold">{pct(s)}%</span>
+              </li>
+            ))}
+          </ul>
         </div>
       </div>
     </>

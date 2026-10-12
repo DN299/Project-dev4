@@ -39,6 +39,7 @@ export async function GET(req: Request) {
         total_reps: therapySessions.total_reps,
         status: therapySessions.status,
         set_number: therapySessions.set_number,
+        side: therapySessions.side,
         fatigue_level: therapySessions.fatigue_level,
         patient_comment: therapySessions.patient_comment,
         appointment_id: therapySessions.appointment_id,

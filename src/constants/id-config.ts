@@ -6,6 +6,7 @@ export const ID_PREFIX = {
   PROGRAM: "PRG",
   APPOINTMENT: "APT",
   CASE: "CS",
+  APPOINTMENT_REQUEST: "REQ",
 };
 export const SEQUENCE = {
   USER: "users_id_seq",
@@ -18,4 +19,5 @@ export const SEQUENCE = {
   DEVICE: "device_id_seq",
   APPOINTMENT: "appointment_id_seq",
   CASE: "case_id_seq",
+  APPOINTMENT_REQUEST: "appointment_request_id_seq",
 } as const;

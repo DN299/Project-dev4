@@ -1,6 +1,6 @@
 export type PageKey =
   // เวชระเบียน
-  | 'dashboard' | 'register' | 'queue' | 'rec-patient' | 'status' | 'schedule' | 'programs'
+  | 'dashboard' | 'register' | 'patients' | 'queue' | 'rec-patient' | 'status' | 'schedule' | 'programs'
   // นักกายภาพ
   | 'my-home' | 'my-cases' | 'case' | 'assess' | 'my-schedule'
   // ผู้ป่วย
@@ -31,6 +31,7 @@ export interface Patient {
   /** น้ำหนักที่บันทึกตอนรับเข้าคิวครั้งล่าสุด */
   weight?: number | string | null; register_date?: string | null; address?: string | null
   affected_side?: string | null
+  title_name?: string | null; subdistrict?: string | null; district?: string | null; province?: string | null
   first_name?: string | null; last_name?: string | null; phone?: string | null
   email?: string | null; birth_date?: string | null; gender?: string | null
   caretaker_name?: string | null; caretaker_phone?: string | null
@@ -87,6 +88,11 @@ export interface PatientAppointment {
   duration_min: number
   appointment_type: 'TRAINING' | 'ASSESSMENT' | string
   treated_side?: string | null
+  /** ข้างของเซตที่กำลังฝึก LEFT / RIGHT */
+  current_side?: string | null
+  /** โปรแกรมที่ใช้ครั้งนี้ (patient_programs) และโปรแกรมที่วางแผนให้ครั้งหน้า (programs) */
+  patient_program_id?: string | null
+  next_program_id?: string | null
   affected_side?: string | null
   current_stage?: DiseaseStage | null
   status: AppointmentStatus | string
@@ -97,6 +103,8 @@ export interface PatientAppointment {
   called_at?: string | null
   started_at?: string | null
   completed_at?: string | null
+  /** เวชระเบียนอ่านผลและจัดการนัดต่อเสร็จแล้ว (ปิดงานของการมาครั้งนี้) */
+  records_done_at?: string | null
   symptoms_today?: string | null
   weight_kg?: number | null
   soap_s?: string | null
@@ -104,6 +112,8 @@ export interface PatientAppointment {
   soap_a?: string | null
   soap_p?: string | null
   soap_saved_at?: string | null
+  /** ส่งแจ้งเตือนนัดให้ผู้ป่วยแล้วหรือยัง */
+  reminder_sent?: boolean
 }
 
 /** ประวัติการฝึกจริง (ตาราง therapy_sessions) */
@@ -114,6 +124,8 @@ export interface TherapySession {
   total_reps: number
   status: string
   set_number?: number
+  /** ข้างที่ฝึกในเซตนี้ LEFT / RIGHT */
+  side?: string | null
   fatigue_level?: number | null
   patient_comment?: string | null
   appointment_id?: string | null
@@ -173,6 +185,27 @@ export interface SessionFeedback {
   created_at: string
   session_id: string
   session_date: string
+  therapist_name?: string | null
+  therapist_lastname?: string | null
+}
+
+/** คำขอนัดจากนักกายภาพ (ตาราง appointment_requests) — เวชระเบียนเลือกช่องจริงในช่วง earliest_date..latest_date */
+export interface AppointmentRequest {
+  request_id: string
+  patient_id: string
+  case_id?: string | null
+  ot_id?: string | null
+  window_label?: string | null
+  /** YYYY-MM-DD */
+  earliest_date: string
+  latest_date: string
+  note?: string | null
+  status: 'PENDING' | 'BOOKED' | 'CANCELLED' | string
+  appointment_id?: string | null
+  created_at: string
+  booked_at?: string | null
+  patient_name?: string | null
+  patient_lastname?: string | null
   therapist_name?: string | null
   therapist_lastname?: string | null
 }

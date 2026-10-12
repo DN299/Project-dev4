@@ -1,20 +1,33 @@
 @import url("https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600;700&family=Prompt:wght@300;400;500;600;700&family=IBM+Plex+Sans+Thai:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap");
 @import "tailwindcss";
+@import "tw-animate-css";
 
 /* โทนตามดีไซน์ "ALS Rehab" — เว็บเวชระเบียน/นักกายภาพ (rx-*) และแอปผู้ป่วย (pt-*) */
 @theme {
-  --color-rx-bg: #F7F8FB;
-  --color-rx-ink: #16365F;
-  --color-rx-muted: #5B738B;
-  --color-rx-faint: #B3BCC8;
-  --color-rx-line: #DDE3EA;
-  --color-rx-soft: #EEF1F6;
-  --color-rx-divider: #F1F4F8;
-  --color-rx-accent: #4D53E0;
-  --color-rx-accent-ink: #3A40C9;
-  --color-rx-accent-deep: #2F33A7;
-  --color-rx-tint: #EDEEFC;
-  --color-rx-tint-2: #C9CBF6;
+  --color-rx-bg: #F2F2F7;
+  --color-rx-ink: #1C1C1E;
+  --color-rx-muted: #6C6C70;
+  --color-rx-faint: #AEAEB2;
+  --color-rx-line: #D1D1D6;
+  --color-rx-soft: #E9E9EE;
+  --color-rx-divider: #E5E5EA;
+  --color-rx-accent: #007AFF;
+  --color-rx-accent-ink: #0066D6;
+  --color-rx-accent-deep: #004FA8;
+  --color-rx-tint: #E5F1FF;
+  --color-rx-tint-2: #B3D7FF;
+  --color-rx-surface: #FFFFFF;
+  --color-rx-sun: #FFD43B;
+  --color-rx-sun-ink: #5C4300;
+  --color-rx-mint: #22C997;
+  --color-rx-mint-ink: #04452F;
+  --color-rx-coral: #FF7A59;
+  --color-rx-sky: #8CC8FF;
+  --radius-field: 0.5rem; /* ช่องกรอกข้อมูล — โค้งน้อยกว่าการ์ด/ปุ่ม */
+  --shadow-rx-card: 0 1px 2px rgba(0, 0, 0, 0.04);
+  --shadow-rx-lift: 0 6px 18px rgba(0, 0, 0, 0.07);
+  --shadow-rx-accent: none;
+  --color-rx-fill: rgba(118, 118, 128, 0.12); /* iOS tertiarySystemFill — รางของ segmented */
   --color-pt-bg: #F7F5FB;
   --color-pt-ink: #1F1D2B;
   --color-pt-muted: #625E70;
@@ -27,6 +40,62 @@
   --font-pt: "IBM Plex Sans Thai", "Noto Sans Thai", "Leelawadee UI", sans-serif;
 }
 
-body { background: var(--color-rx-bg); color: var(--color-rx-ink); font-family: var(--font-rx); }
-button { font-family: inherit; cursor: pointer; }
+body { background: var(--color-rx-bg); color: var(--color-rx-ink); font-family: var(--font-rx); -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale; }
+/* พื้นหลังหน้าเว็บเจ้าหน้าที่ — เทาอ่อนแบบ iOS มีแสงฟ้าจางมากที่มุมบน · ตรึงกับจอ */
+.bg-rx-gradient {
+  background-color: var(--color-rx-bg);
+  background-image: radial-gradient(1000px 520px at 15% -10%, rgba(0, 122, 255, 0.05), transparent 65%);
+  background-attachment: fixed;
+}
+
+/* เว็บกายภาพ/เวชระเบียน — สไตล์ iOS 26 แบบทางการ (กระจกเบาๆ เกือบทึบ)
+   มุม: ปุ่มเป็นแคปซูล (ใส่ใน Button), ปุ่มย่อย (rounded-md) = 8px, rounded-lg = 12px · การ์ดใช้ rx-card (18px) */
+.font-rx {
+  --radius-md: 0.5rem;
+  --radius-lg: 0.75rem;
+  --radius-xl: 1rem;
+}
+
+button { font-family: inherit; cursor: pointer; transition: background-color .2s, border-color .2s, color .2s, box-shadow .2s; }
 input, select, textarea { font-family: inherit; }
+
+/* ===== กระจกแบบทางการ: เกือบทึบ เบลอเบาๆ ขอบบาง ไม่มีแสงวาว ===== */
+/* การ์ดหลัก */
+@utility rx-card {
+  border-radius: 18px;
+  background-color: rgba(255, 255, 255, 0.92);
+  -webkit-backdrop-filter: blur(12px) saturate(140%);
+  backdrop-filter: blur(12px) saturate(140%);
+  border: 1px solid rgba(0, 0, 0, 0.06);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04), 0 4px 16px rgba(0, 0, 0, 0.03);
+}
+/* การ์ดที่กดได้/รายการ: ทึบขึ้นและเงาชัดขึ้นตอนชี้ */
+@utility rx-lift {
+  transition: background-color .2s ease, box-shadow .2s ease;
+  &:hover { background-color: #fff; box-shadow: var(--shadow-rx-lift); }
+}
+/* แผงลอย (sidebar / ปฏิทิน) */
+@utility rx-glass {
+  background-color: rgba(255, 255, 255, 0.86);
+  -webkit-backdrop-filter: blur(20px) saturate(150%);
+  backdrop-filter: blur(20px) saturate(150%);
+  border: 1px solid rgba(0, 0, 0, 0.06);
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.05);
+}
+/* ปุ่มรอง/ช่องเล็ก */
+@utility rx-glass-control {
+  background-color: rgba(255, 255, 255, 0.95);
+  border: 1px solid rgba(0, 0, 0, 0.08);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
+}
+/* ชื่อโลโก้ */
+@utility rx-gradient-text {
+  color: var(--color-rx-ink);
+}
+@media (prefers-reduced-motion: reduce) {
+  .rx-lift, .rx-lift:hover { transition: none; }
+}
+/* เบราว์เซอร์ที่เบลอไม่ได้ → พื้นทึบ */
+@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  .rx-card, .rx-glass { background-color: #fff; }
+}

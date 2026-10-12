@@ -12,7 +12,11 @@ export const patients = pgTable("patients", {
 
   register_date: date("register_date").defaultNow(),
 
+  // บ้านเลขที่ หมู่ ถนน — แขวง/ตำบล อำเภอ/เขต จังหวัด แยกช่อง
   address: varchar("address", { length: 255 }),
+  subdistrict: varchar("subdistrict", { length: 100 }),
+  district: varchar("district", { length: 100 }),
+  province: varchar("province", { length: 100 }),
 
   // ผู้ดูแลหลัก (ญาติ/คนดูแล) — ใช้บัญชีแทนผู้ป่วยได้ถ้า caretaker_can_use_app
   caretaker_name: varchar("caretaker_name", { length: 100 }),

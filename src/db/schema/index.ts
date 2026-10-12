@@ -10,3 +10,4 @@ export * from "./soapAmendments";
 export * from "./therapySession";
 export * from "./movementData";
 export * from "./devices";
+export * from "./appointmentRequests";

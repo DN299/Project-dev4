@@ -5,6 +5,7 @@ import { treatmentCases } from '@/src/db/schema/treatmentCases'
 import { occupationalTherapists } from '@/src/db/schema/occupationalTherapist'
 import { appointments } from '@/src/db/schema/appointments'
 import { patientPrograms } from '@/src/db/schema/patientProgram'
+import { appointmentRequests } from '@/src/db/schema/appointmentRequests'
 import { devices } from '@/src/db/schema/devices'
 import { soapAmendments } from '@/src/db/schema/soapAmendments'
 import { TARGET_STAGE } from '@/src/constants/program'
@@ -13,7 +14,7 @@ import { ID_PREFIX, SEQUENCE } from '@/src/constants/id-config'
 import { dbError } from '@/src/utils/db-error'
 import { requireViewer, authFail, ROLE } from '@/src/utils/auth'
 import { openCaseOf, currentCaseOf } from '@/src/services/case.service'
-import { eq, asc, and, desc, gte, inArray, isNotNull, notInArray } from 'drizzle-orm'
+import { eq, asc, and, desc, gte, inArray, isNotNull, notInArray, sql } from 'drizzle-orm'
 import { NextResponse } from 'next/server'
 import { SLOT_MIN } from '@/src/constants/slot'
 
@@ -48,6 +49,7 @@ export async function GET(req: Request) {
       .select({
         patient_id: patients.patient_id,
         users_id: patients.users_id,
+        title_name: users.title_name,
         first_name: users.first_name,
         last_name: users.last_name,
         phone: users.phone,
@@ -56,6 +58,9 @@ export async function GET(req: Request) {
         gender: users.gender,
         register_date: patients.register_date,
         address: patients.address,
+        subdistrict: patients.subdistrict,
+        district: patients.district,
+        province: patients.province,
         caretaker_name: patients.caretaker_name,
         caretaker_phone: patients.caretaker_phone,
         caretaker_relation: patients.caretaker_relation,
@@ -63,7 +68,8 @@ export async function GET(req: Request) {
       })
       .from(patients)
       .innerJoin(users, eq(patients.users_id, users.users_id))
-      .where(patientId ? eq(patients.patient_id, patientId) : undefined)
+      // รายชื่อไม่รวมผู้ป่วยที่ถูกลบ (ปิดบัญชี) · ดูรายคนยังเปิดประวัติได้
+      .where(patientId ? eq(patients.patient_id, patientId) : sql`coalesce(${users.status}, 'ACTIVE') <> 'INACTIVE'`)
       .orderBy(asc(patients.register_date))
     if (people.length === 0) return NextResponse.json([], { headers: cors })
 
@@ -118,7 +124,8 @@ export async function GET(req: Request) {
 /**
  * PATCH /api/patients — งานของนักกายภาพกับเคส
  * action ASSESS: ประเมินแรกรับ → เคส ACTIVE + มอบโปรแกรม + ปิดนัดประเมิน + ลงนัดฝึกครั้งแรก (ทรานแซกชันเดียว)
- *   { patientId, otId, usersId, stage, affectedSide, assessmentNote, programIds[], assessmentAppointmentId?, nextAppointmentDate }
+ *   { patientId, otId, usersId, stage, affectedSide, assessmentNote, programIds[], assessmentAppointmentId?, nextRequest }
+ *   nextRequest { label, earliestDate, latestDate, note } = ข้อความนัดครั้งถัดไปถึงเวชระเบียน (เวชระเบียนเป็นคนลงนัด)
  * action CLOSE_CASE: เสร็จสิ้นการรักษา — ยกเลิกนัดที่ค้าง { patientId, closeReason, closeStage, closeSummary }
  * action REOPEN_CASE: ยกเลิกการปิดเคสล่าสุด (ถ้ายังไม่มีเคสใหม่) { patientId }
  * action SET_STAGE: อัปเดตระยะอาการของเคส { patientId, stage }
@@ -138,12 +145,10 @@ export async function PATCH(req: Request) {
       if (!VALID_STAGES.has(body.stage)) return fail('กรุณาระบุระยะอาการ')
       const programIds: string[] = Array.isArray(body.programIds) ? body.programIds.filter(Boolean) : []
       if (programIds.length === 0) return fail('เลือกโปรแกรมอย่างน้อย 1 รายการ')
-      if (!body.nextAppointmentDate) return fail('เลือกช่องเวลานัดฝึกครั้งถัดไป')
-
-      const [device] = await db.select({ device_id: devices.device_id }).from(devices)
-        .where(eq(devices.status, 'ACTIVE')).orderBy(asc(devices.device_id)).limit(1)
-      if (!device) return fail('ยังไม่มีกระดานที่ใช้งานได้')
-      const nextId = await generateId(ID_PREFIX.APPOINTMENT, SEQUENCE.APPOINTMENT)
+      // ข้อความนัดครั้งถัดไป (ไม่นัด = null)
+      const nr = body.nextRequest ?? null
+      if (nr && (!nr.earliestDate || !nr.latestDate || nr.latestDate < nr.earliestDate || !nr.note)) return fail('กรอกข้อความนัดครั้งถัดไปถึงเวชระเบียน')
+      const requestId = nr ? await generateId(ID_PREFIX.APPOINTMENT_REQUEST, SEQUENCE.APPOINTMENT_REQUEST) : null
       const ppIds = await Promise.all(programIds.map(() => generateId(ID_PREFIX.PATIENT_PROGRAM, SEQUENCE.PATIENT_PROGRAM)))
       const today = new Date().toISOString().slice(0, 10)
 
@@ -173,20 +178,13 @@ export async function PATCH(req: Request) {
             .where(eq(appointments.appointment_id, body.assessmentAppointmentId))
         }
 
-        await tx.insert(appointments).values({
-          appointment_id: nextId,
-          patient_id: body.patientId,
-          case_id: c.case_id,
-          ot_id: body.otId,
-          created_by: viewer.users_id,
-          device_id: device.device_id,
-          appointment_date: new Date(body.nextAppointmentDate),
-          duration_min: SLOT_MIN,
-          appointment_type: 'TRAINING',
-          status: 'SCHEDULED',
+        // นัดฝึกครั้งแรก: ส่งข้อความให้เวชระเบียนเลือกช่องและลงนัด
+        if (nr && requestId) await tx.insert(appointmentRequests).values({
+          request_id: requestId, patient_id: body.patientId, case_id: c.case_id, ot_id: body.otId, requested_by: viewer.users_id,
+          window_label: nr.label || null, earliest_date: nr.earliestDate, latest_date: nr.latestDate, note: nr.note || null,
         })
       })
-      return NextResponse.json({ message: 'บันทึกผลประเมินและนัดครั้งถัดไปสำเร็จ', appointment_id: nextId }, { headers: cors })
+      return NextResponse.json({ message: 'บันทึกผลประเมินและส่งข้อความนัดให้เวชระเบียนแล้ว', request_id: requestId }, { headers: cors })
     }
 
     if (body.action === 'CLOSE_CASE') {

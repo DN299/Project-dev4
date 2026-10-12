@@ -40,9 +40,8 @@ export default function LoginPage({ onLogin }: Props) {
           <label htmlFor="pw" className="text-[13px] font-semibold">รหัสผ่าน</label>
           <input id="pw" className={inputCls} type="password" value={password} onChange={e => setPassword(e.target.value)} autoComplete="current-password" />
         </div>
-        <a href="#" onClick={e => e.preventDefault()} className="flex min-h-8 items-center self-end text-[13px] text-rx-accent-ink hover:text-rx-accent-deep">ลืมรหัสผ่าน</a>
         {error && <div className="rounded-lg bg-[#FCEBEB] px-3.5 py-2.5 text-[13px] text-[#791F1F]">{error}</div>}
-        <button type="submit" disabled={loading} className="flex h-11 items-center justify-center rounded-lg bg-rx-accent px-[18px] text-[14px] font-semibold text-white hover:bg-rx-accent-ink disabled:opacity-60">
+        <button type="submit" disabled={loading} className="flex h-11 items-center justify-center rounded-full bg-rx-accent px-[18px] text-[14px] font-semibold text-white hover:bg-rx-accent-ink disabled:opacity-60">
           {loading ? 'กำลังเข้าสู่ระบบ...' : 'เข้าสู่ระบบ'}
         </button>
         <span className="text-center text-[13px] leading-relaxed text-rx-muted">ระบบจะพาไปหน้าตามบทบาทของบัญชี<br />ผู้ป่วยใหม่ลงทะเบียนที่เคาน์เตอร์เวชระเบียน</span>

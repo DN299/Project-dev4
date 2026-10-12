@@ -29,6 +29,9 @@ export const therapySessions = pgTable("therapy_sessions", {
 
   patient_comment: text("patient_comment"),
 
+  // ข้างที่ฝึกในเซตนี้ LEFT / RIGHT — ผู้ป่วยที่เป็นทั้งสองข้างประเมินผลแยกข้าง
+  side: varchar("side", { length: 10 }),
+
   // นัดที่เซตนี้เกิดขึ้น — ต้องเป็นนัดที่กำลังฝึก (trigger session_guard)
   appointment_id: varchar("appointment_id", { length: 10 }).references(() => appointments.appointment_id, {
     onDelete: "set null",

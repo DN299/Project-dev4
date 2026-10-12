@@ -156,8 +156,11 @@ export async function DELETE(req: Request) {
   } catch (error: any) {
     const denied = authFail(error, cors)
     if (denied) return denied
+    // มีผู้ป่วยเคยใช้โปรแกรมนี้ (ผลการฝึกอ้างถึงอยู่) → ซ่อนจากคลังแทน เพื่อเก็บประวัติการรักษาไว้
     if (pgErrorCode(error) === '23503') {
-      return NextResponse.json({ error: 'ลบไม่ได้ เนื่องจากมีผู้ป่วยกำลังใช้งานโปรแกรมนี้อยู่ — ลองปิดใช้งานแทน' }, { status: 409, headers: cors })
+      const programId = new URL(req.url).searchParams.get('program_id')
+      if (programId) await db.update(programs).set({ status: 'INACTIVE' }).where(eq(programs.program_id, programId))
+      return NextResponse.json({ message: 'ลบออกจากคลังแล้ว · โปรแกรมนี้มีผู้ป่วยเคยใช้ จึงเก็บไว้ในประวัติการรักษา' }, { headers: cors })
     }
     return NextResponse.json({ error: error.message }, { status: 500, headers: cors })
   }

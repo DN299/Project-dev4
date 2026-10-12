@@ -9,13 +9,13 @@ import { DEFAULT_PASSWORD, hashPassword } from '@/src/utils/password'
 import { dbError } from '@/src/utils/db-error'
 import { requireViewer, authFail, ROLE } from '@/src/utils/auth'
 import { openCaseOf, newCaseId } from '@/src/services/case.service'
-import { eq } from 'drizzle-orm'
+import { eq, and, inArray } from 'drizzle-orm'
 import { NextResponse } from 'next/server'
 import { SLOT_MIN } from '@/src/constants/slot'
 
 const cors = {
   'Access-Control-Allow-Origin': process.env.ALLOWED_ORIGIN || 'http://localhost:5173',
-  'Access-Control-Allow-Methods': 'POST, PATCH',
+  'Access-Control-Allow-Methods': 'POST, PATCH, DELETE',
   'Access-Control-Allow-Headers': 'Content-Type, Authorization, X-Device-Key',
 }
 
@@ -25,21 +25,26 @@ export async function OPTIONS() {
 
 const fail = (error: string, status = 400) => NextResponse.json({ error }, { status, headers: cors })
 
+const SIDES = ['ข้างซ้าย', 'ข้างขวา', 'ทั้งสองข้าง']
+
 const intake = (body: any) => {
   const pain = body.painLevel === undefined || body.painLevel === '' ? null : Number(body.painLevel)
   return {
     chief_complaint: body.chiefComplaint || null,
     pain_level: pain != null && !isNaN(pain) ? Math.max(0, Math.min(10, pain)) : null,
-    symptom_location: body.symptomLocation || null,
+    // ข้างที่มีอาการ (ซ้าย/ขวา/ทั้งสองข้าง) — นักกายภาพยืนยันหรือแก้ได้ตอนประเมิน
+    symptom_location: body.affectedSide || body.symptomLocation || null,
+    affected_side: SIDES.includes(body.affectedSide) ? body.affectedSide : null,
     onset_duration: body.onsetDuration || null,
   }
 }
 
 /**
  * POST /api/register → เวชระเบียนรับผู้ป่วยใหม่ หรือเปิดคอร์สใหม่ให้ผู้ป่วยเก่าที่ปิดเคสไปแล้ว
- * - ผู้ป่วยใหม่: { firstName, lastName, phone, ..., ซักประวัติ, assessment: { otId, appointmentDate }, checkedInBy }
- * - ผู้ป่วยเก่า: { patientId, ซักประวัติ, assessment, checkedInBy }
- * สร้างเคส "รอประเมิน" + นัดประเมินวันนี้ที่รับเข้าคิวแล้ว (ไม่ใช้กระดาน) ในทรานแซกชันเดียว
+ * - ผู้ป่วยใหม่: { firstName, lastName, phone, ..., ซักประวัติ, primaryOtId?, assessment?: { otId, appointmentDate }, checkedInBy }
+ * - ผู้ป่วยเก่า: { patientId, ซักประวัติ, primaryOtId?, assessment?, checkedInBy }
+ * สร้างเคส "รอประเมิน" · ไม่ส่ง assessment = ยังไม่ลงนัด (เวชระเบียนเพิ่มเข้าคิวประเมินเองที่หน้าคิว)
+ * ส่ง assessment = ลงนัดประเมิน (ไม่ใช้กระดาน) ในทรานแซกชันเดียว: นัดวันนี้ = รับเข้าคิวทันที · วันถัดไป = SCHEDULED
  * ระยะของโรคไม่กรอกที่นี่ นักกายภาพเป็นผู้ประเมิน
  */
 export async function POST(req: Request) {
@@ -47,7 +52,11 @@ export async function POST(req: Request) {
     const viewer = requireViewer(req, ROLE.RECORDS)
     const body = await req.json()
     const assessment = body.assessment?.otId && body.assessment?.appointmentDate ? body.assessment : null
-    if (!assessment) return fail('เลือกช่วงเวลาที่นักกายภาพว่างเพื่อนัดประเมินก่อน')
+    // เทียบวันตามเวลาไทย
+    const thaiDay = (d: Date) => new Date(d.getTime() + 7 * 3600_000).toISOString().slice(0, 10)
+    const apptDay = assessment ? thaiDay(new Date(assessment.appointmentDate)) : null, todayTh = thaiDay(new Date())
+    if (apptDay && apptDay < todayTh) return fail('เลือกวันนัดประเมินตั้งแต่วันนี้เป็นต้นไป')
+    const isToday = apptDay === todayTh
 
     const existing: string | null = body.patientId || null
     if (existing) {
@@ -63,7 +72,7 @@ export async function POST(req: Request) {
     const usersId = existing ? null : await generateId(ID_PREFIX.USER, SEQUENCE.USER)
     const patientId = existing ?? await generateId(ID_PREFIX.PATIENT, SEQUENCE.PATIENT)
     const caseId = await newCaseId()
-    const appointmentId = await generateId(ID_PREFIX.APPOINTMENT, SEQUENCE.APPOINTMENT)
+    const appointmentId = assessment ? await generateId(ID_PREFIX.APPOINTMENT, SEQUENCE.APPOINTMENT) : null
     const passwordHash = existing ? null : await hashPassword(DEFAULT_PASSWORD)
 
     await db.transaction(async (tx) => {
@@ -73,6 +82,7 @@ export async function POST(req: Request) {
           role_id: 'R001',
           username: body.phone || usersId!,
           password: passwordHash!,
+          title_name: body.titleName || null,
           first_name: body.firstName,
           last_name: body.lastName,
           phone: body.phone || null,
@@ -84,6 +94,9 @@ export async function POST(req: Request) {
           patient_id: patientId,
           users_id: usersId!,
           address: body.address || null,
+          subdistrict: body.subdistrict || null,
+          district: body.district || null,
+          province: body.province || null,
           caretaker_name: body.caretakerName || null,
           caretaker_phone: body.caretakerPhone || null,
           caretaker_relation: body.caretakerRelation || null,
@@ -94,11 +107,12 @@ export async function POST(req: Request) {
       await tx.insert(treatmentCases).values({
         case_id: caseId,
         patient_id: patientId,
-        primary_ot_id: assessment.otId,
+        primary_ot_id: assessment?.otId || body.primaryOtId || null,
         status: 'PENDING_ASSESSMENT',
         ...intake(body),
       })
 
+      if (!assessment || !appointmentId) return
       await tx.insert(appointments).values({
         appointment_id: appointmentId,
         patient_id: patientId,
@@ -108,9 +122,9 @@ export async function POST(req: Request) {
         appointment_date: new Date(assessment.appointmentDate),
         duration_min: SLOT_MIN,
         appointment_type: 'ASSESSMENT',
-        // ผู้ป่วยอยู่ที่ศูนย์แล้ว จึงรับเข้าคิวประเมินทันที (trigger อนุญาตเฉพาะนัดประเมินของวันนี้)
-        status: 'CHECKED_IN',
-        checked_in_by: viewer.users_id,
+        // นัดวันนี้: ผู้ป่วยอยู่ที่ศูนย์แล้ว จึงรับเข้าคิวประเมินทันที (trigger อนุญาตเฉพาะนัดประเมินของวันนี้)
+        status: isToday ? 'CHECKED_IN' : 'SCHEDULED',
+        checked_in_by: isToday ? viewer.users_id : null,
         symptoms_today: body.chiefComplaint || null,
         weight_kg: body.weight ? String(Number(body.weight)) : null,
       })
@@ -141,6 +155,7 @@ export async function PATCH(req: Request) {
     if (!body.patientId || !body.usersId) return fail('ต้องระบุ patientId และ usersId')
 
     const userPatch: Record<string, unknown> = {}
+    if (body.titleName !== undefined) userPatch.title_name = body.titleName || null
     if (body.firstName !== undefined) userPatch.first_name = body.firstName
     if (body.lastName !== undefined) userPatch.last_name = body.lastName
     if (body.birthDate) userPatch.birth_date = body.birthDate
@@ -151,6 +166,9 @@ export async function PATCH(req: Request) {
 
     const patientPatch: Record<string, unknown> = {}
     if (body.address !== undefined) patientPatch.address = body.address || null
+    if (body.subdistrict !== undefined) patientPatch.subdistrict = body.subdistrict || null
+    if (body.district !== undefined) patientPatch.district = body.district || null
+    if (body.province !== undefined) patientPatch.province = body.province || null
     if (body.caretakerName !== undefined) patientPatch.caretaker_name = body.caretakerName || null
     if (body.caretakerPhone !== undefined) patientPatch.caretaker_phone = body.caretakerPhone || null
     if (body.caretakerRelation !== undefined) patientPatch.caretaker_relation = body.caretakerRelation || null
@@ -165,6 +183,36 @@ export async function PATCH(req: Request) {
       if (openCase && body.primaryOtId) await tx.update(treatmentCases).set({ primary_ot_id: body.primaryOtId }).where(eq(treatmentCases.case_id, openCase.case_id))
     })
     return NextResponse.json({ message: 'บันทึกสำเร็จ' }, { headers: cors })
+  } catch (error: any) {
+    const denied = authFail(error, cors)
+    if (denied) return denied
+    const e = dbError(error)
+    return NextResponse.json({ error: e.error }, { status: e.status, headers: cors })
+  }
+}
+
+/**
+ * DELETE /api/register { patientId } → ลบผู้ป่วยออกจากรายชื่อของศูนย์ (เวชระเบียน)
+ * ไม่ลบข้อมูลจริง เพราะเวชระเบียน ผลการฝึก และ SOAP ต้องเก็บไว้ → ปิดบัญชี (users.status = INACTIVE)
+ * เข้าสู่ระบบไม่ได้อีก ไม่แสดงในรายชื่อ และยกเลิกนัดที่ยังไม่ถึง · ลบไม่ได้ถ้ากำลังอยู่ในคิววันนี้
+ */
+export async function DELETE(req: Request) {
+  try {
+    requireViewer(req, ROLE.RECORDS)
+    const body = await req.json()
+    if (!body.patientId) return fail('ต้องระบุ patientId')
+    const [p] = await db.select({ users_id: patients.users_id }).from(patients).where(eq(patients.patient_id, body.patientId))
+    if (!p) return fail('ไม่พบผู้ป่วย', 404)
+    const [active] = await db.select({ id: appointments.appointment_id }).from(appointments)
+      .where(and(eq(appointments.patient_id, body.patientId), inArray(appointments.status, ['CHECKED_IN', 'IN_PROGRESS']))).limit(1)
+    if (active) return fail('ผู้ป่วยอยู่ในคิวหรือกำลังฝึกอยู่ ลบไม่ได้จนกว่าจะจบการรักษาวันนี้')
+
+    await db.transaction(async (tx) => {
+      await tx.update(appointments).set({ status: 'CANCELLED' })
+        .where(and(eq(appointments.patient_id, body.patientId), eq(appointments.status, 'SCHEDULED')))
+      await tx.update(users).set({ status: 'INACTIVE', updated_at: new Date() }).where(eq(users.users_id, p.users_id))
+    })
+    return NextResponse.json({ message: 'ลบผู้ป่วยออกจากรายชื่อแล้ว' }, { headers: cors })
   } catch (error: any) {
     const denied = authFail(error, cors)
     if (denied) return denied

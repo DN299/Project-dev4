@@ -1,4 +1,4 @@
-import { pgTable, varchar, timestamp, integer, text, decimal } from "drizzle-orm/pg-core";
+import { pgTable, varchar, timestamp, integer, text, decimal, boolean } from "drizzle-orm/pg-core";
 import { users } from "./users";
 import { patients } from "./patients";
 import { occupationalTherapists } from "./occupationalTherapist";
@@ -42,6 +42,11 @@ export const appointments = pgTable("appointments", {
 
   // ข้างที่รักษาในนัดครั้งนั้น (อาจต่างจากข้างหลักของผู้ป่วย)
   treated_side: varchar("treated_side", { length: 20 }),
+  // ข้างของเซตที่กำลังฝึก LEFT / RIGHT (นักกายภาพเลือก กระดานไม่รู้ว่าฝึกข้างไหน) — คัดลอกไปที่ therapy_sessions.side
+  current_side: varchar("current_side", { length: 10 }),
+  // โปรแกรมที่ใช้ครั้งนี้ (patient_programs) และโปรแกรมที่วางแผนให้ครั้งหน้า (programs) — FK อยู่ในฐานข้อมูล (0014)
+  patient_program_id: varchar("patient_program_id", { length: 10 }),
+  next_program_id: varchar("next_program_id", { length: 10 }),
 
   // SCHEDULED → CHECKED_IN (รับคิวแล้ว) → IN_PROGRESS (กำลังฝึก) → COMPLETED / NO_SHOW / CANCELLED
   status: varchar("status", { length: 20 }).notNull().default("SCHEDULED"),
@@ -79,6 +84,13 @@ export const appointments = pgTable("appointments", {
   soap_a: text("soap_a"),
   soap_p: text("soap_p"),
   soap_saved_at: timestamp("soap_saved_at"),
+
+  // ส่งแจ้งเตือนนัดให้ผู้ป่วยแล้วหรือยัง (0015)
+  reminder_sent: boolean("reminder_sent").notNull().default(false),
+
+  // เวชระเบียนอ่านผลการรักษา / ลงนัดต่อ แล้วปิดงานของการมาครั้งนี้ (0016) — ยังไม่ปิด = เรียกคิวถัดไปไม่ได้
+  records_done_at: timestamp("records_done_at"),
+  records_done_by: varchar("records_done_by", { length: 10 }),
 
   created_at: timestamp("created_at").defaultNow().notNull(),
 });

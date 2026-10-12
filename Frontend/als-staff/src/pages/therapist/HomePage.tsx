@@ -1,10 +1,10 @@
 import { useEffect, useState } from 'react'
 import type { AuthUser, PatientAppointment } from '../../types'
 import {
-  list, rangeQuery, addDays, startOfDay, sameDay, isoDate, fromIsoDate, thaiDate, slotLabel, apptSlot, isClosedDay,
-  isTraining, holdsSlot, queueState, ptName, fullName,
+  list, rangeQuery, addDays, startOfDay, sameDay, isoDate, fromIsoDate, thaiDate, slotLabel, apptSlot,
+  isTraining, holdsSlot, queueState, ptName, fullName, stageLabel,
 } from '../../lib/clinic'
-import { Badge, DayStrip, GridTable, GridRow, Loading, Stat } from '../../components/ui'
+import { Badge, DayStrip, GridTable, GridRow, Loading, ThaiCalendarPicker } from '../../components/ui'
 
 interface Props { user: AuthUser; onOpenCase: (patientId: string) => void; onAssess: (appointmentId: string) => void }
 
@@ -32,7 +32,7 @@ export default function TherapistHomePage({ user, onOpenCase, onAssess }: Props)
 
   return (
     <>
-      <h1 className="m-0 text-[30px] font-semibold">สวัสดี {ptName(user.first_name)}</h1>
+      <h1 className="m-0 text-[28px] font-bold leading-tight">สวัสดี {ptName(user.first_name)}</h1>
 
       <div className="flex flex-col gap-3 rounded-lg border border-white bg-white px-4 py-3.5">
         <div className="flex flex-wrap items-center justify-between gap-2.5">
@@ -42,15 +42,15 @@ export default function TherapistHomePage({ user, onOpenCase, onAssess }: Props)
           </div>
           <div className="flex flex-wrap items-center gap-2">
             <label htmlFor="jump" className="text-[13px] text-rx-muted">ไปวันที่</label>
-            <input id="jump" type="date" value={isoDate(sel)} onChange={e => { if (e.target.value) { const d = fromIsoDate(e.target.value); setSel(d); setWin(addDays(d, -3)) } }} className="h-10 rounded-[10px] border border-rx-line bg-white px-2.5 text-[14px]" />
-            <button type="button" onClick={() => { setSel(today); setWin(addDays(today, -3)) }} className="h-10 rounded-[10px] border border-rx-line bg-white px-3.5 text-[13px] font-semibold">วันนี้</button>
+            <ThaiCalendarPicker id="jump" value={isoDate(sel)} onChange={iso => { const d = fromIsoDate(iso); setSel(d); setWin(addDays(d, -3)) }} />
+            <button type="button" onClick={() => { setSel(today); setWin(addDays(today, -3)) }} className="h-10 rounded-full rx-glass-control px-3.5 text-[13px] font-semibold">วันนี้</button>
           </div>
         </div>
         <DayStrip
           days={Array.from({ length: 7 }, (_, i) => addDays(win, i))}
           selected={sel}
           today={today}
-          meta={d => (isClosedDay(d) ? 'ปิด' : `ของฉัน ${mineOn(d).filter(isTraining).length}`)}
+          meta={d => `ของฉัน ${mineOn(d).filter(isTraining).length}`}
           onPick={setSel}
           onPrev={() => setWin(addDays(win, -7))}
           onNext={() => setWin(addDays(win, 7))}
@@ -59,33 +59,22 @@ export default function TherapistHomePage({ user, onOpenCase, onAssess }: Props)
 
       {loading ? <Loading /> : (
         <>
-          {isClosedDay(sel) && (
-            <div className="flex flex-col gap-3 rounded-lg bg-white px-5 py-[22px]">
-              <span className="text-[15px] font-semibold">ศูนย์ปิดวันอาทิตย์</span>
-              <span className="text-[13px] text-rx-muted">ไม่มีนัดและไม่มีการใช้กระดานในวันนี้</span>
-            </div>
-          )}
-          <div className="grid grid-cols-[repeat(auto-fit,minmax(150px,1fr))] gap-3">
-            <Stat label="ช่องของฉัน" value={trainingRows.length} />
-            <Stat label="เสร็จแล้ว" value={trainingRows.filter(a => a.status === 'COMPLETED').length} color="#145C38" />
-          </div>
-
           {now && (
-            <div className="flex flex-col gap-2 rounded-lg bg-white px-5 py-[18px]">
+            <div className="flex flex-col gap-2 rx-card px-5 py-[18px]">
               <div className="flex flex-wrap items-center gap-2.5">
                 <Badge state="now" />
                 <span className="text-[13px] text-rx-muted">ช่อง {slotLabel(apptSlot(now))}{now.device_name ? ` · กระดาน ${now.device_name}` : ''}</span>
               </div>
               <span className="text-[22px] font-semibold">{fullName(now.patient_name, now.patient_lastname)}</span>
               <span className="text-[13px] text-rx-muted">HN {now.patient_id} · {ptName(now.therapist_name)}</span>
-              <button type="button" onClick={() => onOpenCase(now.patient_id)} className="mt-1 h-11 self-start rounded-lg bg-rx-accent px-[18px] text-[14px] font-semibold text-white">รายละเอียด</button>
+              <button type="button" onClick={() => onOpenCase(now.patient_id)} className="mt-1 h-11 self-start rounded-full bg-rx-accent px-[18px] text-[14px] font-semibold text-white">รายละเอียด</button>
             </div>
           )}
 
           <div className="flex flex-col gap-2.5">
             <span className="px-0.5 pt-1 text-[15px] font-semibold">ช่องของฉัน</span>
             {dayRows.length === 0 ? (
-              !isClosedDay(sel) && <span className="px-0.5 text-[13px] text-rx-muted">ไม่มีนัดของคุณในวันนี้</span>
+              <span className="px-0.5 text-[13px] text-rx-muted">ไม่มีนัดของคุณในวันนี้</span>
             ) : (
               <GridTable cols={COLS} minWidth={520} head={['ช่องเวลา', 'ผู้ป่วย', 'สถานะ', '']}>
                 {dayRows.map(a => {
@@ -96,15 +85,18 @@ export default function TherapistHomePage({ user, onOpenCase, onAssess }: Props)
                     <GridRow key={a.appointment_id} cols={COLS}>
                       <span className="font-semibold">{slotLabel(apptSlot(a))}</span>
                       <div className="flex min-w-0 flex-col">
-                        <span className="font-semibold">{assess ? `${name} · ผู้ป่วยใหม่` : name}</span>
-                        <span className="text-[12px] text-rx-muted">HN {a.patient_id}{assess ? ` · มาครั้งแรก${a.symptoms_today ? ` · อาการที่แจ้ง: ${a.symptoms_today}` : ''}` : ''}</span>
+                        <span className="font-semibold">{name}</span>
+                        <span className="text-[12px] text-rx-muted">
+                          HN {a.patient_id}{a.current_stage ? ` · ${stageLabel(a.current_stage)}` : ''}{a.affected_side ? ` · ${a.affected_side}` : ''}
+                        </span>
                       </div>
-                      <div><Badge state={st} /></div>
+                      {/* รักษาหรือประเมินเสร็จแล้ว ขึ้นว่าเสร็จแล้วเหมือนกัน */}
+                      <div>{a.status === 'COMPLETED' ? <Badge label="เสร็จแล้ว" bg="#E4F5EC" fg="#145C38" /> : <Badge state={st} />}</div>
                       <div>
                         {assess && st === 'assess' && !(sel < today) ? (
-                          <button type="button" onClick={() => onAssess(a.appointment_id)} className="inline-flex h-10 items-center whitespace-nowrap rounded-lg bg-rx-accent px-3.5 text-[13px] font-semibold text-white">ประเมินอาการ</button>
-                        ) : (['now', 'called', 'done', 'wait', 'assessed'] as string[]).includes(st) ? (
-                          <button type="button" onClick={() => onOpenCase(a.patient_id)} className="inline-flex h-10 items-center whitespace-nowrap rounded-lg border border-rx-line bg-white px-3.5 text-[13px] font-semibold">รายละเอียด</button>
+                          <button type="button" onClick={() => onAssess(a.appointment_id)} className="inline-flex h-10 items-center whitespace-nowrap rounded-full bg-rx-accent px-3.5 text-[13px] font-semibold text-white">ประเมินอาการ</button>
+                        ) : (['now', 'called', 'done', 'review', 'wait', 'assessed'] as string[]).includes(st) ? (
+                          <button type="button" onClick={() => onOpenCase(a.patient_id)} className="inline-flex h-10 items-center whitespace-nowrap rounded-full rx-glass-control px-3.5 text-[13px] font-semibold">รายละเอียด</button>
                         ) : null}
                       </div>
                     </GridRow>
