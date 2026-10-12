@@ -180,11 +180,13 @@ export default function PatientQueuePage({ patientId, onTrain }: Props) {
             ? [`ฝึกแล้ว ${setsToday} เซต`, "#E4F5EC", "#145C38"]
             : st === "IN_PROGRESS"
               ? ["กำลังฝึก", "#E3EEF9", "#1F5573"]
-              : st === "CHECKED_IN" && reached
+              : st === "CHECKED_IN" && appt.called_at
                 ? ["ถึงคิวแล้ว · เริ่มฝึกได้เลย", "#FFF0D9", "#8C420A"]
-                : st === "CHECKED_IN"
-                  ? [`ก่อนหน้าคุณ ${ahead} คน`, "#E4F5EC", "#145C38"]
-                  : ["ยังไม่ได้รับคิว", "#FFF0D9", "#8C420A"];
+                : st === "CHECKED_IN" && reached
+                  ? ["รอเจ้าหน้าที่เรียกคิว", "#FFF0D9", "#8C420A"]
+                  : st === "CHECKED_IN"
+                    ? [`ก่อนหน้าคุณ ${ahead} คน`, "#E4F5EC", "#145C38"]
+                    : ["ยังไม่ได้รับคิว", "#FFF0D9", "#8C420A"];
 
   const steps = [
     {
@@ -217,12 +219,10 @@ export default function PatientQueuePage({ patientId, onTrain }: Props) {
 
   // ปุ่มฝึก: ต้องรับคิวแล้ว (หรือเคยฝึกวันนี้แล้ว) และยังไม่หมดเวลานัด
   // ครบเซตตามโปรแกรมแล้ว = ฝึกต่อไม่ได้ (กันฝึกเกินขนาดที่นักกายภาพสั่ง)
+  const called =
+    st === "IN_PROGRESS" || (st === "CHECKED_IN" && !!appt.called_at); // เวชเรียกคิวแล้ว
   const canTrain =
-    !assess &&
-    st !== "COMPLETED" &&
-    !expired &&
-    !allDone &&
-    (checkedIn || trained);
+    !assess && st !== "COMPLETED" && !expired && !allDone && called;
 
   return (
     <div className="flex flex-col gap-3.5">

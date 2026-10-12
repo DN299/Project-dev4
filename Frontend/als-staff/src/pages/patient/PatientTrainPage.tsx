@@ -40,8 +40,8 @@ type LiveDevice = Device & {
  * none      = ไม่พบเครื่องในระบบ
  * offline   = เครื่องปิดหรือไม่มีเน็ต
  * busy      = ผู้ป่วยคนอื่นกำลังฝึก
- * available = เครื่องว่าง กด "เชื่อมต่อ" ได้
- * ready     = เชื่อมต่อกับเราแล้ว กด "เริ่มเซต" ได้
+ * available = เครื่องว่าง แต่เวชยังไม่เรียกคิวของเรา (รอเรียกคิว)
+ * ready     = เวชเรียกคิวแล้ว กระดานผูกกับนัดของเรา กด "เริ่มเซต" ได้
  * running   = กำลังนับ กด "จบเซต" ได้
  */
 type Phase = "none" | "offline" | "busy" | "available" | "ready" | "running";
@@ -289,9 +289,7 @@ export default function PatientTrainPage({ patientId, onBack }: Props) {
   const [todaySessions, setTodaySessions] = useState<SkateSession[]>([]);
   const [loading, setLoading] = useState(true);
   const [elapsed, setElapsed] = useState(0);
-  const [busyAction, setBusyAction] = useState<
-    "claim" | "start" | "stop" | null
-  >(null);
+  const [busyAction, setBusyAction] = useState<"start" | "stop" | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [lastSet, setLastSet] = useState<SkateSession | null>(null); // เซตที่เพิ่งจบ → แสดงหน้าผล
   const [confirmEnd, setConfirmEnd] = useState(false); // ถามยืนยันเมื่อจบก่อนครบเวลา
@@ -362,9 +360,6 @@ export default function PatientTrainPage({ patientId, onBack }: Props) {
           : "ready";
 
   // ล้างสถานะ "กำลังทำ..." เมื่อบอร์ดตอบสนองแล้ว
-  useEffect(() => {
-    if (busyAction === "claim" && isMine) setBusyAction(null);
-  }, [busyAction, isMine]);
   useEffect(() => {
     if (phase !== "running") return;
     if (busyAction === "start") setBusyAction(null);
@@ -448,24 +443,6 @@ export default function PatientTrainPage({ patientId, onBack }: Props) {
   }, [liveReps]);
 
   // ---------- ปุ่ม ----------
-  const connect = async () => {
-    if (!device || busyAction) return;
-    setError(null);
-    setBusyAction("claim");
-    const err = await post("/api/devices/claim", {
-      deviceId: device.device_id,
-      patientId,
-    });
-    if (err) {
-      setError(err);
-      setBusyAction(null);
-      return;
-    }
-    fetchDevice()
-      .then(setDevice)
-      .catch(() => {});
-  };
-
   const startSet = async () => {
     if (!device || busyAction) return;
     setError(null);
@@ -602,13 +579,18 @@ export default function PatientTrainPage({ patientId, onBack }: Props) {
     if (!imuError) imuCued.current = false;
   }, [imuError, phase]);
 
-  // ส่งเสียงครั้งเดียวเมื่อครบเวลา
+  // ครบเวลา: ส่งเสียง แล้วจบเซตให้เองใน 3 วินาที (ผู้ป่วยไม่ต้องกด)
+  const AUTO_END_MS = 3000;
+  const endRef = useRef(doEndSet);
+  endRef.current = doEndSet;
   useEffect(() => {
-    if (timeUp && !timeUpCued.current) {
-      timeUpCued.current = true;
-      cue();
-    }
-  }, [timeUp]);
+    if (!(timeUp && phase === "running") || timeUpCued.current) return;
+    timeUpCued.current = true;
+    cue();
+    setConfirmEnd(false);
+    const t = setTimeout(() => endRef.current(), AUTO_END_MS);
+    return () => clearTimeout(t);
+  }, [timeUp, phase]);
 
   // ทำครบทุกข้างตามโปรแกรมแล้วหรือยัง
   const bySide = countBySide(todaySessions);
@@ -626,7 +608,7 @@ export default function PatientTrainPage({ patientId, onBack }: Props) {
     none: { text: "ไม่พบเครื่องฝึก", tone: "muted" },
     offline: { text: "เครื่องปิดอยู่", tone: "muted" },
     busy: { text: "มีคนใช้อยู่", tone: "muted" },
-    available: { text: "เครื่องพร้อม", tone: "warn" },
+    available: { text: "รอเรียกคิว", tone: "warn" },
     ready: { text: "เชื่อมต่อแล้ว", tone: "ok" },
     running: { text: "เชื่อมต่อแล้ว", tone: "ok" },
   }[phase];
@@ -642,7 +624,7 @@ export default function PatientTrainPage({ patientId, onBack }: Props) {
           : phase === "busy"
             ? "รอผู้ป่วยท่านก่อนหน้าฝึกเสร็จ"
             : phase === "available"
-              ? "กดเชื่อมต่อเพื่อเริ่ม"
+              ? "รอเจ้าหน้าที่เรียกคิว แล้วกดเริ่มเซตได้เลย"
               : phase === "ready"
                 ? imuError
                   ? "รอเซ็นเซอร์กลับมาปกติ"
@@ -655,35 +637,34 @@ export default function PatientTrainPage({ patientId, onBack }: Props) {
 
   const primary = lockedDone
     ? { label: "ฝึกครบแล้ววันนี้", onClick: () => {}, filled: false }
-    : phase === "available"
+    : phase === "ready"
       ? {
-          label:
-            busyAction === "claim" ? "กำลังเชื่อมต่อ..." : "เชื่อมต่อเครื่อง",
-          onClick: connect,
+          label: busyAction === "start" ? "กำลังเริ่ม..." : "เริ่มเซต",
+          onClick: startSet,
           filled: true,
         }
-      : phase === "ready"
+      : phase === "running"
         ? {
-            label: busyAction === "start" ? "กำลังเริ่ม..." : "เริ่มเซต",
-            onClick: startSet,
-            filled: true,
+            label: busyAction === "stop" ? "กำลังบันทึก..." : "จบเซต",
+            onClick: endSet,
+            filled: false,
           }
-        : phase === "running"
-          ? {
-              label: busyAction === "stop" ? "กำลังบันทึก..." : "จบเซต",
-              onClick: endSet,
-              filled: false,
-            }
-          : {
-              label: phase === "busy" ? "รอคิว" : "รอเครื่อง",
-              onClick: () => {},
-              filled: false,
-            };
+        : {
+            label:
+              phase === "busy"
+                ? "รอคิว"
+                : phase === "available"
+                  ? "รอเรียกคิว"
+                  : "รอเครื่อง",
+            onClick: () => {},
+            filled: false,
+          };
   const primaryDisabled =
     !!busyAction ||
     phase === "none" ||
     phase === "offline" ||
     phase === "busy" ||
+    phase === "available" ||
     lockedDone ||
     (imuError && phase === "ready"); // เซ็นเซอร์เสีย ห้ามเริ่มเซต (นับไม่ได้) แต่ยังกดจบเซตได้เสมอ
 
@@ -923,7 +904,7 @@ export default function PatientTrainPage({ patientId, onBack }: Props) {
       </button>
       {phase === "running" && (
         <span className="text-center text-[15px] text-pt-muted">
-          {timeUp ? "กดจบเซตเพื่อบันทึกผล" : "เหนื่อยหยุดได้เลย"}
+          {timeUp ? "ครบเวลาแล้ว ระบบกำลังจบเซตให้" : "เหนื่อยหยุดได้เลย"}
         </span>
       )}
 

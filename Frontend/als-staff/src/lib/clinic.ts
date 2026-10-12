@@ -7,7 +7,7 @@ import type { DiseaseStage, PatientAppointment } from '../types'
 
 const SESSION_KEY = 'als-session'
 const sessionToken = (): string | null => {
-  try { return (JSON.parse(localStorage.getItem(SESSION_KEY) ?? 'null') as { token?: string } | null)?.token ?? null } catch { return null }
+  try { return (JSON.parse(sessionStorage.getItem(SESSION_KEY) ?? 'null') as { token?: string } | null)?.token ?? null } catch { return null }
 }
 
 /** เรียก API พร้อม token ของผู้ใช้ — API ตรวจบทบาทและใช้ตัวตนจาก token เสมอ */
@@ -23,7 +23,7 @@ export async function api<T = unknown>(path: string, init?: { method?: string; b
   })
   // เซสชันหมดอายุ → กลับไปหน้าเข้าสู่ระบบ
   if (res.status === 401 && token && !path.startsWith('/api/auth/')) {
-    localStorage.removeItem(SESSION_KEY)
+    sessionStorage.removeItem(SESSION_KEY)
     window.location.reload()
   }
   const data = await res.json().catch(() => ({}))
